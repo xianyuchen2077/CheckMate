@@ -5,9 +5,10 @@ import database
 
 
 class ReminderManager:
-    def __init__(self, main_window, tray_manager=None):
+    def __init__(self, main_window, tray_manager=None, pet_window=None):
         self.main_window = main_window
         self.tray_manager = tray_manager
+        self.pet_window = pet_window
         self.reminded_keys = set()
 
         self.timer = QTimer(self.main_window)
@@ -35,6 +36,9 @@ class ReminderManager:
             self.show_reminder(task_id, title, remind_time)
 
     def show_reminder(self, task_id, title, remind_time):
+        if self.pet_window is not None:
+            self.pet_window.set_reminding(title)
+
         if self.tray_manager is not None:
             self.tray_manager.show_message(
                 "CheckMate 提醒",
@@ -63,6 +67,9 @@ class ReminderManager:
             self.main_window.tip_label.setText(f"已完成打卡：{title}")
             self.main_window.load_tasks()
 
+            if self.pet_window is not None:
+                self.pet_window.set_done()
+
         elif clicked_button == later_button:
             self.snooze_task(task_id, title, remind_time)
 
@@ -70,6 +77,9 @@ class ReminderManager:
             self.main_window.show_main_window()
 
     def snooze_task(self, task_id, title, remind_time):
+        if self.pet_window is not None:
+            self.pet_window.set_lazy()
+
         QMessageBox.information(
             self.main_window,
             "稍后提醒",

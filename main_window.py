@@ -19,6 +19,7 @@ from add_task_dialog import AddTaskDialog
 from reminder_manager import ReminderManager
 from styles import MAIN_WINDOW_STYLE
 from tray_manager import TrayManager
+from pet_window import PetWindow
 
 
 class MainWindow(QMainWindow):
@@ -39,7 +40,9 @@ class MainWindow(QMainWindow):
         self.tray_manager = TrayManager(self)
         self.tray_manager.init_tray()
 
-        self.reminder_manager = ReminderManager(self, self.tray_manager)
+        self.init_pet()
+
+        self.reminder_manager = ReminderManager(self, self.tray_manager, self.pet_window)
         self.reminder_manager.start()
 
     def init_ui(self):
@@ -141,6 +144,13 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(left_panel, 3)
         main_layout.addLayout(right_panel, 1)
 
+    def init_pet(self):
+        """
+        初始化桌面宠物浮窗。
+        """
+        self.pet_window = PetWindow(self)
+        self.pet_window.show()
+
     def apply_styles(self):
         self.setStyleSheet(MAIN_WINDOW_STYLE)
 
@@ -151,6 +161,9 @@ class MainWindow(QMainWindow):
 
     def quit_app(self):
         self.force_quit = True
+
+        if hasattr(self, "pet_window"):
+            self.pet_window.close()
 
         if hasattr(self, "tray_manager"):
             self.tray_manager.hide()
@@ -230,6 +243,9 @@ class MainWindow(QMainWindow):
         database.mark_task_done_today(task_id)
         self.tip_label.setText("不错，今天没有变咸鱼。")
         self.load_tasks()
+
+        if hasattr(self, "pet_window"):
+            self.pet_window.set_done()
 
     def delete_task(self):
         current_item = self.task_list.currentItem()
