@@ -1,0 +1,268 @@
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+import database
+from add_task_dialog import AddTaskDialog
+from reminder_manager import ReminderManager
+from styles import MAIN_WINDOW_STYLE
+from tray_manager import TrayManager
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        database.init_db()
+
+        self.setWindowTitle("CheckMate - 不要成为咸鱼")
+        self.resize(900, 600)
+
+        self.force_quit = False
+
+        self.init_ui()
+        self.apply_styles()
+        self.load_tasks()
+
+        self.tray_manager = TrayManager(self)
+        self.tray_manager.init_tray()
+
+        self.reminder_manager = ReminderManager(self, self.tray_manager)
+        self.reminder_manager.start()
+
+    def init_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(20)
+        central_widget.setLayout(main_layout)
+
+        left_panel = QVBoxLayout()
+        left_panel.setSpacing(15)
+
+        title_label = QLabel("CheckMate")
+        title_label.setObjectName("titleLabel")
+
+        subtitle_label = QLabel("不要成为咸鱼 · 你的桌面打卡督促助手")
+        subtitle_label.setObjectName("subtitleLabel")
+
+        left_panel.addWidget(title_label)
+        left_panel.addWidget(subtitle_label)
+
+        task_card = QFrame()
+        task_card.setObjectName("card")
+        task_layout = QVBoxLayout()
+        task_layout.setSpacing(12)
+        task_card.setLayout(task_layout)
+
+        task_title = QLabel("今日任务")
+        task_title.setObjectName("sectionTitle")
+
+        self.task_list = QListWidget()
+        self.task_list.setObjectName("taskList")
+
+        task_layout.addWidget(task_title)
+        task_layout.addWidget(self.task_list)
+
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+
+        self.add_btn = QPushButton("添加任务")
+        self.complete_btn = QPushButton("完成打卡")
+        self.delete_btn = QPushButton("删除任务")
+
+        self.add_btn.clicked.connect(self.add_task)
+        self.complete_btn.clicked.connect(self.complete_task)
+        self.delete_btn.clicked.connect(self.delete_task)
+
+        button_layout.addWidget(self.add_btn)
+        button_layout.addWidget(self.complete_btn)
+        button_layout.addWidget(self.delete_btn)
+
+        task_layout.addLayout(button_layout)
+        left_panel.addWidget(task_card)
+
+        right_panel = QVBoxLayout()
+        right_panel.setSpacing(15)
+
+        stats_card = QFrame()
+        stats_card.setObjectName("card")
+        stats_layout = QVBoxLayout()
+        stats_layout.setSpacing(10)
+        stats_card.setLayout(stats_layout)
+
+        stats_title = QLabel("打卡统计")
+        stats_title.setObjectName("sectionTitle")
+
+        self.today_stat = QLabel("今日完成：0")
+        self.streak_stat = QLabel("连续打卡：0 天")
+        self.month_stat = QLabel("本月完成率：0%")
+        self.fish_stat = QLabel("咸鱼值：50")
+
+        stats_layout.addWidget(stats_title)
+        stats_layout.addWidget(self.today_stat)
+        stats_layout.addWidget(self.streak_stat)
+        stats_layout.addWidget(self.month_stat)
+        stats_layout.addWidget(self.fish_stat)
+
+        tip_card = QFrame()
+        tip_card.setObjectName("card")
+        tip_layout = QVBoxLayout()
+        tip_card.setLayout(tip_layout)
+
+        tip_title = QLabel("今日提醒")
+        tip_title.setObjectName("sectionTitle")
+
+        self.tip_label = QLabel("开始行动吧，今天不要成为咸鱼。")
+        self.tip_label.setWordWrap(True)
+        self.tip_label.setObjectName("tipLabel")
+
+        tip_layout.addWidget(tip_title)
+        tip_layout.addWidget(self.tip_label)
+
+        right_panel.addWidget(stats_card)
+        right_panel.addWidget(tip_card)
+        right_panel.addStretch()
+
+        main_layout.addLayout(left_panel, 3)
+        main_layout.addLayout(right_panel, 1)
+
+    def apply_styles(self):
+        self.setStyleSheet(MAIN_WINDOW_STYLE)
+
+    def show_main_window(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def quit_app(self):
+        self.force_quit = True
+
+        if hasattr(self, "tray_manager"):
+            self.tray_manager.hide()
+
+        QApplication.quit()
+
+    def closeEvent(self, event):
+        if self.force_quit:
+            event.accept()
+            return
+
+        event.ignore()
+        self.hide()
+
+        if hasattr(self, "tray_manager"):
+            self.tray_manager.show_message(
+                "CheckMate 仍在运行",
+                "我已经缩到系统托盘啦，到点还会提醒你，不要成为咸鱼。",
+                3000
+            )
+
+    def load_tasks(self):
+        self.task_list.clear()
+
+        tasks = database.get_all_tasks_with_today_status()
+
+        for task in tasks:
+            title = task["title"]
+            remind_time = task["remind_time"]
+            is_done_today = task["is_done_today"]
+            task_id = task["id"]
+
+            status_icon = "✅" if is_done_today else "⬜"
+
+            if remind_time:
+                display_text = f"{status_icon} {title}    ⏰ {remind_time}"
+            else:
+                display_text = f"{status_icon} {title}"
+
+            item = QListWidgetItem(display_text)
+            item.setData(1000, task_id)
+            item.setData(1001, is_done_today)
+            item.setForeground(QColor("#111827"))
+
+            self.task_list.addItem(item)
+
+        self.update_stats()
+
+    def add_task(self):
+        dialog = AddTaskDialog(self)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            title, remind_time = dialog.get_data()
+
+            if not title:
+                QMessageBox.information(self, "提示", "任务名称不能为空。")
+                return
+
+            database.add_task(title, remind_time)
+            self.tip_label.setText(f"新任务已添加：{title}，提醒时间：{remind_time}")
+            self.load_tasks()
+
+    def complete_task(self):
+        current_item = self.task_list.currentItem()
+
+        if current_item is None:
+            QMessageBox.information(self, "提示", "请先选择一个任务。")
+            return
+
+        task_id = current_item.data(1000)
+        is_done_today = current_item.data(1001)
+
+        if is_done_today:
+            QMessageBox.information(self, "提示", "这个任务今天已经完成打卡了。")
+            return
+
+        database.mark_task_done_today(task_id)
+        self.tip_label.setText("不错，今天没有变咸鱼。")
+        self.load_tasks()
+
+    def delete_task(self):
+        current_item = self.task_list.currentItem()
+
+        if current_item is None:
+            QMessageBox.information(self, "提示", "请先选择一个任务。")
+            return
+
+        task_id = current_item.data(1000)
+        item_text = current_item.text()
+
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定要删除这个任务吗？\n\n{item_text}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            database.delete_task(task_id)
+            self.tip_label.setText(f"已删除任务：{item_text}")
+            self.load_tasks()
+
+    def update_stats(self):
+        total, done = database.get_today_stats()
+
+        self.today_stat.setText(f"今日完成：{done} / {total}")
+
+        streak = database.get_streak_days()
+        self.streak_stat.setText(f"连续打卡：{streak} 天")
+
+        month_percent = database.get_month_stats()
+        self.month_stat.setText(f"本月完成率：{month_percent}%")
+
+        fish_value = max(0, 100 - done * 15 - streak * 5)
+        self.fish_stat.setText(f"咸鱼值：{fish_value}")
