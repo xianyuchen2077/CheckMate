@@ -319,6 +319,7 @@ class PetWindow(QWidget):
         """
         self.current_stage = stage
         self.image_paths = self.build_image_paths()
+        self.refresh_growth_info()
         self.set_idle()
 
     def move_to_bottom_right(self):
@@ -361,17 +362,24 @@ class PetWindow(QWidget):
 
     def refresh_growth_info(self):
         """
-        从数据库读取宠物等级、经验和阶段，并刷新显示。
+        从数据库读取宠物等级、经验、阶段，并刷新显示与资源路径。
         """
         pet = database.get_pet_status()
 
         if pet is None:
+            self.current_stage = 1
+            self.image_paths = self.build_image_paths()
             self.pet_growth_label.setText("Lv.1 · 咸鱼苗\nEXP 0 / 120")
             return
 
         level = pet["level"]
         exp = pet["exp"]
         stage = pet["stage"]
+
+        # 如果数据库里的阶段变化了，就切换资源目录
+        if stage != self.current_stage:
+            self.current_stage = stage
+            self.image_paths = self.build_image_paths()
 
         stage_name = pet_growth.get_stage_name(stage)
         required_exp = pet_growth.get_required_exp(level)
