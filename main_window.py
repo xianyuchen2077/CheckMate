@@ -78,6 +78,7 @@ class MainWindow(QMainWindow):
 
         self.task_list = QListWidget()
         self.task_list.setObjectName("taskList")
+        self.task_list.currentItemChanged.connect(self.update_task_detail)
 
         task_layout.addWidget(task_title)
         task_layout.addWidget(self.task_list)
@@ -146,7 +147,31 @@ class MainWindow(QMainWindow):
         tip_layout.addWidget(tip_title)
         tip_layout.addWidget(self.tip_label)
 
+        detail_card = QFrame()
+        detail_card.setObjectName("card")
+        detail_layout = QVBoxLayout()
+        detail_layout.setSpacing(8)
+        detail_card.setLayout(detail_layout)
+
+        detail_title = QLabel("任务详情")
+        detail_title.setObjectName("sectionTitle")
+
+        self.detail_name = QLabel("任务名称：未选择")
+        self.detail_time = QLabel("提醒时间：-")
+        self.detail_active = QLabel("任务状态：-")
+        self.detail_today = QLabel("今日状态：-")
+        self.detail_description = QLabel("备注说明：-")
+        self.detail_description.setWordWrap(True)
+
+        detail_layout.addWidget(detail_title)
+        detail_layout.addWidget(self.detail_name)
+        detail_layout.addWidget(self.detail_time)
+        detail_layout.addWidget(self.detail_active)
+        detail_layout.addWidget(self.detail_today)
+        detail_layout.addWidget(self.detail_description)
+
         right_panel.addWidget(stats_card)
+        right_panel.addWidget(detail_card)
         right_panel.addWidget(tip_card)
         right_panel.addStretch()
 
@@ -246,6 +271,48 @@ class MainWindow(QMainWindow):
             self.task_list.addItem(item)
 
         self.update_stats()
+        self.update_task_detail()
+
+    def update_task_detail(self):
+        if not hasattr(self, "detail_name"):
+            return
+
+        current_item = self.task_list.currentItem()
+
+        if current_item is None:
+            self.detail_name.setText("任务名称：未选择")
+            self.detail_time.setText("提醒时间：-")
+            self.detail_active.setText("任务状态：-")
+            self.detail_today.setText("今日状态：-")
+            self.detail_description.setText("备注说明：-")
+            return
+
+        task_id = current_item.data(1000)
+        is_done_today = current_item.data(1001)
+        is_active = current_item.data(1002)
+
+        task = database.get_task_by_id(task_id)
+
+        if task is None:
+            self.detail_name.setText("任务名称：任务不存在")
+            self.detail_time.setText("提醒时间：-")
+            self.detail_active.setText("任务状态：-")
+            self.detail_today.setText("今日状态：-")
+            self.detail_description.setText("备注说明：-")
+            return
+
+        title = task["title"]
+        remind_time = task["remind_time"] or "未设置"
+        description = task["description"] or "暂无备注"
+
+        active_text = "启用中" if is_active else "已暂停"
+        today_text = "已完成" if is_done_today else "未完成"
+
+        self.detail_name.setText(f"任务名称：{title}")
+        self.detail_time.setText(f"提醒时间：{remind_time}")
+        self.detail_active.setText(f"任务状态：{active_text}")
+        self.detail_today.setText(f"今日状态：{today_text}")
+        self.detail_description.setText(f"备注说明：{description}")
 
     def add_task(self):
         dialog = AddTaskDialog(self)
