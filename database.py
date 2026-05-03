@@ -220,19 +220,29 @@ def delete_task(task_id):
 
 
 def mark_task_done_today(task_id):
+    """
+    标记任务今天已完成。
+
+    返回：
+        True：本次确实新增了一条打卡记录
+        False：今天已经打过卡，没有重复新增
+    """
     today = get_today_string()
 
     conn = get_connection()
     cursor = conn.cursor()
 
-    # INSERT OR IGNORE 可以避免同一天重复打卡
     cursor.execute("""
-        INSERT OR IGNORE INTO checkins (task_id, checkin_date, checkin_time)
-        VALUES (?, ?, ?)
-    """, (task_id, today, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        INSERT OR IGNORE INTO checkins (task_id, checkin_date)
+        VALUES (?, ?)
+    """, (task_id, today))
+
+    is_new_checkin = cursor.rowcount > 0
 
     conn.commit()
     conn.close()
+
+    return is_new_checkin
 
 
 def get_today_stats():

@@ -24,6 +24,7 @@ from reminder_manager import ReminderManager
 from styles import get_main_window_style
 from tray_manager import TrayManager
 from pet_window import PetWindow
+from pet_system import pet_growth
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -241,6 +242,7 @@ class MainWindow(QMainWindow):
         total, done = database.get_today_stats()
 
         if hasattr(self, "pet_window"):
+            self.pet_window.refresh_growth_info()
             self.pet_window.set_progress(done, total)
             self.pet_window.show()
             self.pet_window.raise_()
@@ -408,13 +410,13 @@ class MainWindow(QMainWindow):
     def complete_task(self):
         current_item = self.task_list.currentItem()
 
-        if current_item is None:
-            QMessageBox.information(self, "提示", "请先选择一个任务。")
-            return
-
         task_id = current_item.data(1000)
         is_done_today = current_item.data(1001)
         is_active = current_item.data(1002)
+
+        if current_item is None:
+            QMessageBox.information(self, "提示", "请先选择一个任务。")
+            return
 
         if not is_active:
             QMessageBox.information(self, "提示", "这个任务已暂停，不能打卡。")
@@ -424,11 +426,24 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "这个任务今天已经完成打卡了。")
             return
 
-        database.mark_task_done_today(task_id)
-        self.tip_label.setText("不错，今天没有变咸鱼。")
+        is_new_checkin = database.mark_task_done_today(task_id)
+
+        if not is_new_checkin:
+            QMessageBox.information(self, "提示", "这个任务今天已经完成打卡了。")
+            return
+
+        task = database.get_task_by_id(task_id)
+        growth_result = pet_growth.add_exp_for_completed_task(task)
+
+        if growth_result is not None:
+            self.tip_label.setText(growth_result["message"])
+        else:
+            self.tip_label.setText("不错，今天没有变咸鱼。")
+
         self.load_tasks()
 
         if hasattr(self, "pet_window"):
+            self.pet_window.refresh_growth_info()
             self.pet_window.set_done()
 
     def toggle_task_active(self):

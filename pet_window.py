@@ -2,6 +2,9 @@ from pathlib import Path
 import random
 import sys
 
+import database
+from pet_system import pet_growth
+
 from PySide6.QtCore import Qt, QPoint, QTimer, QSize
 from PySide6.QtGui import QColor, QPixmap, QAction, QMovie
 from PySide6.QtWidgets import (
@@ -90,6 +93,7 @@ class PetWindow(QWidget):
 
         self.init_ui()
         self.move_to_bottom_right()
+        self.refresh_growth_info()
         self.set_idle()
 
         self.init_message_timer()
@@ -111,6 +115,11 @@ class PetWindow(QWidget):
         self.pet_image.setObjectName("petImage")
         self.pet_image.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
+        self.pet_growth_label = QLabel("Lv.1 · 咸鱼苗\nEXP 0 / 120")
+        self.pet_growth_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pet_growth_label.setObjectName("petGrowthLabel")
+        self.pet_growth_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
         self.pet_text = QLabel()
         self.pet_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.pet_text.setWordWrap(True)
@@ -121,8 +130,8 @@ class PetWindow(QWidget):
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(6)
         layout.addWidget(self.pet_image)
+        layout.addWidget(self.pet_growth_label)
         layout.addWidget(self.pet_text)
-
         self.container.setLayout(layout)
 
         outer_layout = QVBoxLayout()
@@ -130,7 +139,7 @@ class PetWindow(QWidget):
         outer_layout.addWidget(self.container)
 
         self.setLayout(outer_layout)
-        self.setFixedSize(210, 190)
+        self.setFixedSize(200, 230) # 调整宠物窗口大小
 
         self.setStyleSheet("""
             #petContainer {
@@ -139,6 +148,13 @@ class PetWindow(QWidget):
             }
 
             #petImage {
+                background-color: transparent;
+            }
+
+            #petGrowthLabel {
+                font-size: 12px;
+                font-weight: 700;
+                color: #2563eb;
                 background-color: transparent;
             }
 
@@ -299,6 +315,28 @@ class PetWindow(QWidget):
             color: {color};
             background-color: transparent;
         """)
+
+    def refresh_growth_info(self):
+        """
+        从数据库读取宠物等级、经验和阶段，并刷新显示。
+        """
+        pet = database.get_pet_status()
+
+        if pet is None:
+            self.pet_growth_label.setText("Lv.1 · 咸鱼苗\nEXP 0 / 120")
+            return
+
+        level = pet["level"]
+        exp = pet["exp"]
+        stage = pet["stage"]
+
+        stage_name = pet_growth.get_stage_name(stage)
+        required_exp = pet_growth.get_required_exp(level)
+
+        self.pet_growth_label.setText(
+            f"Lv.{level} · {stage_name}\n"
+            f"EXP {exp} / {required_exp}"
+        )
 
     def set_idle(self):
         self.is_reminding = False

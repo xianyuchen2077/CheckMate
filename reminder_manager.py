@@ -4,7 +4,7 @@ from PySide6.QtCore import QTimer
 
 import database
 from reminder_dialog import ReminderDialog, SnoozeDialog
-
+from pet_system import pet_growth
 
 class ReminderManager:
     def __init__(self, main_window, tray_manager=None, pet_window=None):
@@ -107,13 +107,32 @@ class ReminderManager:
         """
         处理“完成打卡”。
         """
-        database.mark_task_done_today(task_id)
+        is_new_checkin = database.mark_task_done_today(task_id)
 
-        self.main_window.tip_label.setText(f"已完成打卡：{title}")
+        if not is_new_checkin:
+            self.main_window.tip_label.setText(f"今天已经完成过：{title}")
+            return
+
+        task = database.get_task_by_id(task_id)
+        growth_result = pet_growth.add_exp_for_completed_task(task)
+
+        if growth_result is not None:
+            self.main_window.tip_label.setText(growth_result["message"])
+        else:
+            self.main_window.tip_label.setText(f"已完成打卡：{title}")
+
         self.main_window.load_tasks()
 
         if self.pet_window is not None:
+            self.pet_window.refresh_growth_info()
             self.pet_window.set_done()
+
+        if self.tray_manager is not None and growth_result is not None:
+            self.tray_manager.show_message(
+                "宠物成长",
+                growth_result["message"],
+                4000
+            )
 
     def choose_snooze_option(self, task_id, title, remind_time):
         """
