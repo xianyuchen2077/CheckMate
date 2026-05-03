@@ -3,7 +3,9 @@ import random
 import sys
 
 import database
+import config_manager
 from pet_system import pet_growth
+from pet_settings_dialog import PetSettingsDialog
 
 from PySide6.QtCore import Qt, QPoint, QTimer, QSize
 from PySide6.QtGui import QColor, QPixmap, QAction, QMovie
@@ -45,6 +47,7 @@ class PetWindow(QWidget):
         super().__init__()
 
         self.main_window = main_window
+        self.pet_config = config_manager.get_pet_config()
         self.drag_position = QPoint()
         self.is_dragging = False
         self.is_reminding = False
@@ -70,6 +73,7 @@ class PetWindow(QWidget):
 
         # 当前进化阶段，对应 stage_1 / stage_2 / stage_3 / stage_4
         self.current_stage = 1
+        self.current_pet_state = "idle"
 
         # 当前宠物状态图片路径
         self.image_paths = self.build_image_paths()
@@ -108,9 +112,9 @@ class PetWindow(QWidget):
         ]
 
         self.init_ui()
-        self.move_to_bottom_right()
         self.refresh_growth_info()
         self.set_idle()
+        self.apply_pet_settings()
 
         self.init_message_timer()
 
@@ -247,6 +251,9 @@ class PetWindow(QWidget):
         根据状态加载宠物图片。
         支持 gif 动画和 png 静态图。
         """
+
+        self.current_pet_state = state_name
+
         # 停止之前的 GIF 动画
         if self.current_movie is not None:
             self.current_movie.stop()
@@ -450,6 +457,50 @@ class PetWindow(QWidget):
         self.pet_exp_bar.setValue(progress_percent)
         self.pet_exp_label.setText(f"EXP {exp} / {required_exp}")
 
+    def apply_pet_settings(self):
+        """
+        应用宠物配置：
+        - 不透明度
+        - 是否置顶
+        - 保存的位置
+        """
+        pet_config = config_manager.get_pet_config()
+
+        opacity = float(pet_config.get("opacity", 1.0))
+        self.setWindowOpacity(opacity)
+
+        always_on_top = bool(pet_config.get("always_on_top", True))
+        self.set_always_on_top(always_on_top)
+
+        x = pet_config.get("x")
+        y = pet_config.get("y")
+
+        if x is not None and y is not None:
+            self.move(int(x), int(y))
+        else:
+            self.move_to_bottom_right()
+
+    def set_always_on_top(self, enabled):
+        """
+        设置宠物窗口是否始终置顶。
+        修改窗口 flags 后，Qt 可能会重建窗口，因此需要重新加载宠物图片。
+        """
+        was_visible = self.isVisible()
+
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+
+        if enabled:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+
+        self.setWindowFlags(flags)
+
+        if was_visible:
+            self.show()
+
+        # 重新加载当前阶段资源和当前状态图片，避免图片消失
+        self.image_paths = self.build_image_paths()
+        self.load_pet_image(getattr(self, "current_pet_state", "idle"))
+
     def set_idle(self):
         self.is_reminding = False
         self.set_text_color("#405279")
@@ -573,6 +624,11 @@ class PetWindow(QWidget):
 
             self.is_dragging = False
 
+            config_manager.update_pet_config(
+                x=self.pos().x(),
+                y=self.pos().y()
+            )
+
             # 移动距离很小，认为是一次单击
             if moved_distance < 5:
                 self.say_random_idle_message()
@@ -613,12 +669,15 @@ class PetWindow(QWidget):
         if self.main_window is not None:
             quit_action.triggered.connect(self.main_window.quit_app)
 
-        # 皮肤切换
-        morty_action = QAction("切换为 Morty", self)
-        morty_action.triggered.connect(lambda: self.switch_skin("Morty"))
+        settings_action = QAction("宠物设置", self)
+        settings_action.triggered.connect(self.open_pet_settings)
 
-        rick_action = QAction("切换为 Rick", self)
-        rick_action.triggered.connect(lambda: self.switch_skin("Rick"))
+        # 皮肤切换
+        # morty_action = QAction("切换为 Morty", self)
+        # morty_action.triggered.connect(lambda: self.switch_skin("Morty"))
+
+        # rick_action = QAction("切换为 Rick", self)
+        # rick_action.triggered.connect(lambda: self.switch_skin("Rick"))
 
         menu.addAction(show_action)
         menu.addAction(progress_action)
@@ -631,14 +690,20 @@ class PetWindow(QWidget):
         menu.addSeparator()
         menu.addAction(quit_action)
         menu.addSeparator()
-        menu.addAction(morty_action)
-        menu.addAction(rick_action)
+        menu.addAction(settings_action)
+        menu.addSeparator()
+        # menu.addAction(morty_action)
+        # menu.addAction(rick_action)
 
         menu.exec(self.mapToGlobal(position))
 
     def open_main_window(self):
         if self.main_window is not None:
             self.main_window.show_main_window()
+
+    def open_pet_settings(self):
+        dialog = PetSettingsDialog(self, self.main_window)
+        dialog.exec()
 
     def print_resource_debug_info(self):
         print("[PetWindow] ASSETS_DIR:", ASSETS_DIR)

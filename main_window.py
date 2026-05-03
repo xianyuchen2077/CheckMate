@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 import database
+import config_manager
 from add_task_dialog import AddTaskDialog
 from history_dialog import HistoryDialog
 from reminder_manager import ReminderManager
@@ -219,7 +220,10 @@ class MainWindow(QMainWindow):
         初始化桌面宠物浮窗。
         """
         self.pet_window = PetWindow(self)
-        self.pet_window.show()
+
+        pet_config = config_manager.get_pet_config()
+        if pet_config.get("show_on_startup", True):
+            self.pet_window.show()
 
     def apply_styles(self):
         self.setStyleSheet(get_main_window_style(get_background_path()))
