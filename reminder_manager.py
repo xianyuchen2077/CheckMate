@@ -1,7 +1,9 @@
+from datetime import datetime,timedelta
+
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QMessageBox
 
 import database
+from reminder_dialog import ReminderDialog, SnoozeDialog
 
 
 class ReminderManager:
@@ -10,15 +12,23 @@ class ReminderManager:
         self.tray_manager = tray_manager
         self.pet_window = pet_window
         self.reminded_keys = set()
+        self.skip_today_keys = set()
 
         self.timer = QTimer(self.main_window)
         self.timer.timeout.connect(self.check_reminders)
 
     def start(self):
+        """
+        启动提醒检查定时器。
+        每 30 秒检查一次是否有到点且未完成的任务。
+        """
         self.timer.start(30 * 1000)
         self.check_reminders()
 
     def check_reminders(self):
+        """
+        检查当前是否有需要提醒的任务。
+        """
         due_tasks = database.get_due_tasks_now()
 
         for task in due_tasks:
@@ -27,6 +37,11 @@ class ReminderManager:
             remind_time = task["remind_time"]
 
             today = database.get_today_string()
+            skip_today_key = f"{today}-{task_id}"
+
+            if skip_today_key in self.skip_today_keys:
+                continue
+
             remind_key = f"{today}-{task_id}-{remind_time}"
 
             if remind_key in self.reminded_keys:
@@ -36,9 +51,51 @@ class ReminderManager:
             self.show_reminder(task_id, title, remind_time)
 
     def show_reminder(self, task_id, title, remind_time):
+        """
+        显示提醒。
+
+        ReminderManager 只负责业务流程：
+        - 更新宠物状态
+        - 发送托盘通知
+        - 调用 ReminderDialog 显示弹窗
+        - 根据用户选择执行后续动作
+        """
+        self.notify_pet_reminding(title)
+        self.notify_tray_reminding(title, remind_time)
+
+        dialog = ReminderDialog(
+            task_title=title,
+            remind_time=remind_time,
+            parent=self.main_window
+        )
+
+        dialog.exec()
+        action_result = dialog.get_action_result()
+
+        if action_result == ReminderDialog.RESULT_DONE:
+            self.handle_done(task_id, title)
+
+        elif action_result == ReminderDialog.RESULT_LATER:
+            self.choose_snooze_option(task_id, title, remind_time)
+
+        elif action_result == ReminderDialog.RESULT_OPEN:
+            self.main_window.show_main_window()
+
+        else:
+            # 用户关闭弹窗，暂时不做处理
+            pass
+
+    def notify_pet_reminding(self, title):
+        """
+        通知桌面宠物进入提醒状态。
+        """
         if self.pet_window is not None:
             self.pet_window.set_reminding(title)
 
+    def notify_tray_reminding(self, title, remind_time):
+        """
+        发送系统托盘提醒。
+        """
         if self.tray_manager is not None:
             self.tray_manager.show_message(
                 "CheckMate 提醒",
@@ -46,47 +103,83 @@ class ReminderManager:
                 5000
             )
 
-        msg_box = QMessageBox(self.main_window)
-        msg_box.setWindowTitle("CheckMate 提醒")
-        msg_box.setText("该打卡啦！")
-        msg_box.setInformativeText(
-            f"任务：{title}\n提醒时间：{remind_time}\n\n今天不要成为咸鱼。"
-        )
+    def handle_done(self, task_id, title):
+        """
+        处理“完成打卡”。
+        """
+        database.mark_task_done_today(task_id)
 
-        done_button = msg_box.addButton("完成打卡", QMessageBox.ButtonRole.AcceptRole)
-        later_button = msg_box.addButton("稍后提醒", QMessageBox.ButtonRole.ActionRole)
-        open_button = msg_box.addButton("打开主窗口", QMessageBox.ButtonRole.ActionRole)
+        self.main_window.tip_label.setText(f"已完成打卡：{title}")
+        self.main_window.load_tasks()
 
-        msg_box.setIcon(QMessageBox.Icon.Information)
-        msg_box.exec()
+        if self.pet_window is not None:
+            self.pet_window.set_done()
 
-        clicked_button = msg_box.clickedButton()
-
-        if clicked_button == done_button:
-            database.mark_task_done_today(task_id)
-            self.main_window.tip_label.setText(f"已完成打卡：{title}")
-            self.main_window.load_tasks()
-
-            if self.pet_window is not None:
-                self.pet_window.set_done()
-
-        elif clicked_button == later_button:
-            self.snooze_task(task_id, title, remind_time)
-
-        elif clicked_button == open_button:
-            self.main_window.show_main_window()
-
-    def snooze_task(self, task_id, title, remind_time):
+    def choose_snooze_option(self, task_id, title, remind_time):
+        """
+        打开稍后提醒选项弹窗。
+        """
         if self.pet_window is not None:
             self.pet_window.set_lazy()
 
-        QMessageBox.information(
-            self.main_window,
-            "稍后提醒",
-            f"好，5 分钟后再提醒你：{title}"
-        )
+        dialog = SnoozeDialog(title, self.main_window)
+        dialog.exec()
+
+        action_result = dialog.get_action_result()
+
+        if action_result == SnoozeDialog.RESULT_SNOOZE:
+            snooze_until = dialog.get_snooze_until()
+
+            if snooze_until is None:
+                return
+
+            self.schedule_snooze(task_id, title, remind_time, snooze_until)
+
+        elif action_result == SnoozeDialog.RESULT_TODAY_SKIP:
+            self.skip_task_today(task_id, title)
+
+        else:
+            # 用户关闭稍后弹窗，不做处理
+            pass
+
+    def schedule_snooze(self, task_id, title, remind_time, snooze_until):
+        """
+        安排下一次稍后提醒。
+        """
+        now = datetime.now()
+        delay_ms = int((snooze_until - now).total_seconds() * 1000)
+
+        if delay_ms < 1000:
+            delay_ms = 1000
+
+        display_time = snooze_until.strftime("%H:%M")
+
+        if self.tray_manager is not None:
+            self.tray_manager.show_message(
+                "CheckMate",
+                f"好，{display_time} 再提醒你：{title}",
+                3000
+            )
 
         QTimer.singleShot(
-            5 * 60 * 1000,
+            delay_ms,
             lambda: self.show_reminder(task_id, title, remind_time)
         )
+
+    def skip_task_today(self, task_id, title):
+        """
+        今天不再提醒这个任务。
+        """
+        today = database.get_today_string()
+        skip_today_key = f"{today}-{task_id}"
+        self.skip_today_keys.add(skip_today_key)
+
+        if self.pet_window is not None:
+            self.pet_window.set_lazy()
+
+        if self.tray_manager is not None:
+            self.tray_manager.show_message(
+                "CheckMate",
+                f"今天不再提醒：{title}",
+                3000
+            )
