@@ -5,6 +5,7 @@ from PySide6.QtCore import QTimer
 import database
 from reminder_dialog import ReminderDialog, SnoozeDialog
 from pet_system import pet_growth
+from pet_growth_dialog import PetGrowthDialog
 
 class ReminderManager:
     def __init__(self, main_window, tray_manager=None, pet_window=None):
@@ -133,6 +134,20 @@ class ReminderManager:
                 growth_result["message"],
                 4000
             )
+
+        if growth_result is not None:
+            self.show_pet_growth_dialog(growth_result)
+
+    def show_pet_growth_dialog(self, growth_result):
+        """
+        提醒弹窗完成任务后，显示宠物升级 / 进化提示。
+        普通加经验不弹窗。
+        """
+        if not growth_result.get("leveled_up") and not growth_result.get("evolved"):
+            return
+
+        dialog = PetGrowthDialog(growth_result, self.main_window)
+        dialog.exec()
 
     def choose_snooze_option(self, task_id, title, remind_time):
         """

@@ -272,35 +272,33 @@ class PetWindow(QWidget):
 
         return fallback_dir
 
-
     def build_image_paths(self):
         """
         构建宠物各状态图片路径。
-        每个状态优先加载 gif，没有 gif 再加载 png。
+        优先加载当前阶段资源。
+        当前阶段缺失时，回退到 stage_1。
+        每个状态优先 gif，再 png。
         """
-        pet_assets_dir = self.get_pet_assets_dir()
+        current_stage_dir = PETS_DIR / self.current_skin / f"stage_{self.current_stage}"
+        stage_1_dir = PETS_DIR / self.current_skin / "stage_1"
+        skin_root_dir = PETS_DIR / self.current_skin
+
+        def candidates(file_base_name):
+            return [
+                current_stage_dir / f"{file_base_name}.gif",
+                current_stage_dir / f"{file_base_name}.png",
+                stage_1_dir / f"{file_base_name}.gif",
+                stage_1_dir / f"{file_base_name}.png",
+                skin_root_dir / f"{file_base_name}.gif",
+                skin_root_dir / f"{file_base_name}.png",
+            ]
 
         return {
-            "idle": [
-                pet_assets_dir / "pet_idle.gif",
-                pet_assets_dir / "pet_idle.png",
-            ],
-            "remind": [
-                pet_assets_dir / "pet_remind.gif",
-                pet_assets_dir / "pet_remind.png",
-            ],
-            "done": [
-                pet_assets_dir / "pet_done.gif",
-                pet_assets_dir / "pet_done.png",
-            ],
-            "lazy": [
-                pet_assets_dir / "pet_lazy.gif",
-                pet_assets_dir / "pet_lazy.png",
-            ],
-            "sleep": [
-                pet_assets_dir / "pet_sleep.gif",
-                pet_assets_dir / "pet_sleep.png",
-            ],
+            "idle": candidates("pet_idle"),
+            "remind": candidates("pet_remind"),
+            "done": candidates("pet_done"),
+            "lazy": candidates("pet_lazy"),
+            "sleep": candidates("pet_sleep"),
         }
 
     def switch_skin(self, skin_name):
@@ -314,8 +312,8 @@ class PetWindow(QWidget):
 
     def switch_stage(self, stage):
         """
-        切换宠物进化阶段。
-        stage=1 对应 stage_1，stage=2 对应 stage_2。
+        手动切换宠物进化阶段。
+        主要用于测试或后续调试。
         """
         self.current_stage = stage
         self.image_paths = self.build_image_paths()
@@ -362,7 +360,8 @@ class PetWindow(QWidget):
 
     def refresh_growth_info(self):
         """
-        从数据库读取宠物等级、经验、阶段，并刷新显示与资源路径。
+        从数据库读取宠物等级、经验、阶段。
+        如果阶段变化，就切换对应 stage_x 资源目录。
         """
         pet = database.get_pet_status()
 
@@ -376,7 +375,6 @@ class PetWindow(QWidget):
         exp = pet["exp"]
         stage = pet["stage"]
 
-        # 如果数据库里的阶段变化了，就切换资源目录
         if stage != self.current_stage:
             self.current_stage = stage
             self.image_paths = self.build_image_paths()

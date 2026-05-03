@@ -25,6 +25,7 @@ from styles import get_main_window_style
 from tray_manager import TrayManager
 from pet_window import PetWindow
 from pet_system import pet_growth
+from pet_growth_dialog import PetGrowthDialog
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -446,6 +447,9 @@ class MainWindow(QMainWindow):
             self.pet_window.refresh_growth_info()
             self.pet_window.set_done()
 
+        if growth_result is not None:
+            self.show_pet_growth_dialog(growth_result)
+
     def toggle_task_active(self):
         current_item = self.task_list.currentItem()
 
@@ -498,3 +502,14 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "pet_window"):
             self.pet_window.update_by_fish_value(fish_value, done, total)
+
+    def show_pet_growth_dialog(self, growth_result):
+        """
+        显示宠物成长提示。
+        只有升级或进化时弹窗；普通加经验只更新 tip_label。
+        """
+        if not growth_result.get("leveled_up") and not growth_result.get("evolved"):
+            return
+
+        dialog = PetGrowthDialog(growth_result, self)
+        dialog.exec()

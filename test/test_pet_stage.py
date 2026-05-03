@@ -19,14 +19,14 @@ def main():
     database.save_pet_status(
         pet_name=pet["pet_name"],
         skin=pet["skin"],
-        level=1,
+        level=5,
         exp=0,
-        stage=1,
+        stage=2,
         mood="evolved",
         total_tasks_done=pet["total_tasks_done"]
     )
 
-    print("已把宠物强制设置为 Lv.1 / Stage 1")
+    print("已把宠物强制设置为 Lv.5 / Stage 2")
 
 
 if __name__ == "__main__":
