@@ -371,3 +371,6 @@ class MainWindow(QMainWindow):
 
         fish_value = max(0, 100 - done * 15 - streak * 5)
         self.fish_stat.setText(f"咸鱼值：{fish_value}")
+
+        if hasattr(self, "pet_window"):
+            self.pet_window.update_by_progress(done, total)

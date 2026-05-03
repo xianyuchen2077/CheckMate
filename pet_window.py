@@ -1,7 +1,7 @@
 from pathlib import Path
 import random
 
-from PySide6.QtCore import Qt, QPoint
+from PySide6.QtCore import Qt, QPoint, QTimer
 from PySide6.QtGui import QColor, QPixmap, QAction
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,6 +24,8 @@ class PetWindow(QWidget):
         self.main_window = main_window
         self.drag_position = QPoint()
         self.is_dragging = False
+        self.is_reminding = False
+        self.is_status_locked = False
         self.press_global_pos = QPoint()
 
         self.setMouseTracking(True)
@@ -79,6 +81,8 @@ class PetWindow(QWidget):
         self.move_to_bottom_right()
         self.set_idle()
 
+        self.init_message_timer()
+
     def init_ui(self):
         self.container = QFrame()
         self.container.setObjectName("petContainer")
@@ -130,15 +134,33 @@ class PetWindow(QWidget):
             #petText {
                 font-size: 13px;
                 font-weight: 600;
-                color: #111827;
+                color: {color};
                 background-color: transparent;
             }
         """)
 
+    def init_message_timer(self):
+        """
+        初始化宠物随机语录定时器。
+        默认每 60 秒换一句普通语录。
+        """
+        self.message_timer = QTimer(self)
+        self.message_timer.timeout.connect(self.auto_change_message)
+        self.message_timer.start(60 * 1000) # 更改切换频率修改此处
+
     def load_pet_image(self, state_name):
         image_path = self.image_paths.get(state_name)
 
-        if image_path is None or not image_path.exists():
+        print(f"[PetWindow] 当前状态：{state_name}")
+        print(f"[PetWindow] 图片路径：{image_path}")
+
+        if image_path is None:
+            print("[PetWindow] 错误：没有找到对应状态的图片路径")
+            self.pet_image.setText("🐟")
+            return
+
+        if not image_path.exists():
+            print(f"[PetWindow] 错误：图片文件不存在：{image_path}")
             self.pet_image.setText("🐟")
             self.pet_image.setStyleSheet("""
                 font-size: 48px;
@@ -150,8 +172,11 @@ class PetWindow(QWidget):
         pixmap = QPixmap(str(image_path))
 
         if pixmap.isNull():
+            print(f"[PetWindow] 错误：QPixmap 加载失败，可能图片格式不受支持或文件损坏：{image_path}")
             self.pet_image.setText("🐟")
             return
+
+        print(f"[PetWindow] 图片加载成功：{image_path}")
 
         scaled_pixmap = pixmap.scaled(
             120,
@@ -160,6 +185,7 @@ class PetWindow(QWidget):
             Qt.TransformationMode.SmoothTransformation
         )
 
+        self.pet_image.setStyleSheet("background-color: transparent;")
         self.pet_image.setText("")
         self.pet_image.setPixmap(scaled_pixmap)
 
@@ -172,31 +198,112 @@ class PetWindow(QWidget):
         self.move(x, y)
 
     def say_random_idle_message(self):
+        self.is_reminding = False
         self.load_pet_image("idle")
         self.pet_text.setText(random.choice(self.idle_messages))
 
+    def auto_change_message(self):
+        """
+        自动切换宠物语录。
+        提醒状态或短暂状态锁定时，不自动覆盖。
+        """
+        if getattr(self, "is_reminding", False):
+            return
+
+        if getattr(self, "is_status_locked", False):
+            return
+
+        self.say_random_idle_message()
+
+    def unlock_status(self):
+        self.is_status_locked = False
+        self.say_random_idle_message()
+
+    def set_text_color(self, color):
+        self.pet_text.setStyleSheet(f"""
+            font-size: 13px;
+            font-weight: 600;
+            color: {color};
+            background-color: transparent;
+        """)
+
     def set_idle(self):
+        self.is_reminding = False
+        self.set_text_color("#405279")
         self.say_random_idle_message()
 
     def set_reminding(self, task_title):
+        self.is_reminding = True
+        self.is_status_locked = False
+        self.set_text_color("#b91c1c")
         self.load_pet_image("remind")
         self.pet_text.setText(f"该打卡啦：{task_title}")
 
     def set_done(self):
+        self.is_reminding = False
+        self.is_status_locked = True
+        self.set_text_color("#d1449b")
+
         self.load_pet_image("done")
         self.pet_text.setText(random.choice(self.done_messages))
 
-    def set_progress(self, done, total):
-        self.load_pet_image("idle")
-        self.pet_text.setText(f"今日进度：{done} / {total}")
+        QTimer.singleShot(8 * 1000, self.unlock_status)
 
     def set_lazy(self):
+        self.is_reminding = False
+        self.is_status_locked = True
+        self.set_text_color("#c48d34")
+
         self.load_pet_image("lazy")
         self.pet_text.setText(random.choice(self.lazy_messages))
 
+        QTimer.singleShot(8 * 1000, self.unlock_status)
+
     def set_sleeping(self):
+        self.is_reminding = False
+        self.is_status_locked = True
+        self.set_text_color("#397250")
         self.load_pet_image("sleep")
         self.pet_text.setText("暂时休息一下")
+
+    def set_progress(self, done, total):
+        self.is_reminding = False
+        self.set_text_color("#F9F756")
+
+        if total == 0:
+            self.load_pet_image("idle")
+            self.pet_text.setText("今天还没有任务")
+        elif done == total:
+            self.load_pet_image("done")
+            self.pet_text.setText(f"今日进度：{done} / {total}，全部完成")
+        elif done == 0:
+            self.load_pet_image("lazy")
+            self.pet_text.setText(f"今日进度：0 / {total}，还没开始")
+        else:
+            self.load_pet_image("idle")
+            self.pet_text.setText(f"今日进度：{done} / {total}")
+
+    def update_by_progress(self, done, total):
+        if self.is_reminding:
+            return
+
+        if total == 0:
+            self.load_pet_image("idle")
+            self.pet_text.setText("今天还没有任务，可以先添加一个")
+            return
+
+        if done == 0:
+            self.load_pet_image("lazy")
+            self.pet_text.setText(f"今日进度：0 / {total}，先动一下吧")
+            return
+
+        if done < total:
+            self.load_pet_image("idle")
+            self.pet_text.setText(f"今日进度：{done} / {total}，继续推进")
+            return
+
+        self.load_pet_image("done")
+        self.pet_text.setText("今日任务全部完成，不错")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
