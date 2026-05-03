@@ -6,27 +6,41 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QDialogButtonBox,
     QVBoxLayout,
+    QCheckBox,
 )
 
 from styles import ADD_TASK_DIALOG_STYLE
 
-
 class AddTaskDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, title="", remind_time=None):
         super().__init__(parent)
 
-        self.setWindowTitle("添加任务")
-        self.resize(360, 180)
+        self.setWindowTitle("添加任务" if not title else "编辑任务")
+        self.resize(380, 210)
 
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("例如：背英语单词 30 个")
+        self.title_edit.setText(title)
+
+        self.enable_time_checkbox = QCheckBox("设置提醒时间")
 
         self.time_edit = QTimeEdit()
         self.time_edit.setDisplayFormat("HH:mm")
-        self.time_edit.setTime(QTime.currentTime())
+
+        if remind_time:
+            self.enable_time_checkbox.setChecked(True)
+            self.time_edit.setTime(QTime.fromString(remind_time, "HH:mm"))
+            self.time_edit.setEnabled(True)
+        else:
+            self.enable_time_checkbox.setChecked(False)
+            self.time_edit.setTime(QTime.currentTime())
+            self.time_edit.setEnabled(False)
+
+        self.enable_time_checkbox.stateChanged.connect(self.on_time_checkbox_changed)
 
         form_layout = QFormLayout()
         form_layout.addRow("任务名称：", self.title_edit)
+        form_layout.addRow("", self.enable_time_checkbox)
         form_layout.addRow("提醒时间：", self.time_edit)
 
         self.button_box = QDialogButtonBox(
@@ -44,7 +58,15 @@ class AddTaskDialog(QDialog):
         self.setLayout(main_layout)
         self.setStyleSheet(ADD_TASK_DIALOG_STYLE)
 
+    def on_time_checkbox_changed(self):
+        self.time_edit.setEnabled(self.enable_time_checkbox.isChecked())
+
     def get_data(self):
         title = self.title_edit.text().strip()
-        remind_time = self.time_edit.time().toString("HH:mm")
+
+        if self.enable_time_checkbox.isChecked():
+            remind_time = self.time_edit.time().toString("HH:mm")
+        else:
+            remind_time = None
+
         return title, remind_time

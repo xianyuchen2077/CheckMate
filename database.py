@@ -24,6 +24,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             remind_time TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -36,6 +37,12 @@ def init_db():
         cursor.execute("""
             ALTER TABLE tasks
             ADD COLUMN remind_time TEXT
+        """)
+
+    if "is_active" not in columns:
+        cursor.execute("""
+            ALTER TABLE tasks
+            ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1
         """)
 
     # 打卡记录表：保存每天的完成记录
@@ -78,6 +85,7 @@ def get_all_tasks_with_today_status():
             tasks.id,
             tasks.title,
             tasks.remind_time,
+            tasks.is_active,
             tasks.created_at,
             CASE
                 WHEN checkins.id IS NULL THEN 0
@@ -108,6 +116,34 @@ def add_task(title, remind_time=None):
     conn.commit()
     conn.close()
 
+def get_task_by_id(task_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, title, remind_time, created_at, is_active
+        FROM tasks
+        WHERE id = ?
+    """, (task_id,))
+
+    task = cursor.fetchone()
+    conn.close()
+
+    return task
+
+
+def update_task(task_id, title, remind_time):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        UPDATE tasks
+        SET title = ?, remind_time = ?
+        WHERE id = ?
+    """, (title, remind_time, task_id))
+
+    conn.commit()
+    conn.close()
 
 def delete_task(task_id):
     conn = get_connection()
@@ -236,6 +272,8 @@ def get_streak_days():
 def get_due_tasks_now():
     """
     获取当前时间需要提醒、且今天还没完成的任务。
+    没有设置提醒时间的任务不会触发提醒。
+    暂停任务不会触发提醒。
     """
     now_time = datetime.now().strftime("%H:%M")
     today = get_today_string()
@@ -252,7 +290,10 @@ def get_due_tasks_now():
         LEFT JOIN checkins
             ON tasks.id = checkins.task_id
             AND checkins.checkin_date = ?
-        WHERE tasks.remind_time = ?
+        WHERE tasks.is_active = 1
+          AND tasks.remind_time IS NOT NULL
+          AND tasks.remind_time != ''
+          AND tasks.remind_time = ?
           AND checkins.id IS NULL
     """, (today, now_time))
 
@@ -260,3 +301,19 @@ def get_due_tasks_now():
     conn.close()
 
     return tasks
+
+def toggle_task_active(task_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        UPDATE tasks
+        SET is_active = CASE
+            WHEN is_active = 1 THEN 0
+            ELSE 1
+        END
+        WHERE id = ?
+    """, (task_id,))
+
+    conn.commit()
+    conn.close()

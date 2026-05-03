@@ -137,6 +137,17 @@ QLabel {
     font-size: 14px;
 }
 
+QCheckBox {
+    color: #111827;
+    background-color: transparent;
+    font-size: 14px;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+}
+
 QLineEdit, QTimeEdit {
     background-color: #ffffff;
     color: #111827;

@@ -85,16 +85,22 @@ class MainWindow(QMainWindow):
         button_layout.setSpacing(10)
 
         self.add_btn = QPushButton("添加任务")
+        self.edit_btn = QPushButton("编辑任务")
         self.complete_btn = QPushButton("完成打卡")
         self.delete_btn = QPushButton("删除任务")
+        self.toggle_active_btn = QPushButton("暂停/启用")
 
         self.add_btn.clicked.connect(self.add_task)
+        self.edit_btn.clicked.connect(self.edit_task)
         self.complete_btn.clicked.connect(self.complete_task)
         self.delete_btn.clicked.connect(self.delete_task)
+        self.toggle_active_btn.clicked.connect(self.toggle_task_active)
 
         button_layout.addWidget(self.add_btn)
+        button_layout.addWidget(self.edit_btn)
         button_layout.addWidget(self.complete_btn)
         button_layout.addWidget(self.delete_btn)
+        button_layout.addWidget(self.toggle_active_btn)
 
         task_layout.addLayout(button_layout)
         left_panel.addWidget(task_card)
@@ -194,9 +200,15 @@ class MainWindow(QMainWindow):
             title = task["title"]
             remind_time = task["remind_time"]
             is_done_today = task["is_done_today"]
+            is_active = task["is_active"]
             task_id = task["id"]
 
-            status_icon = "✅" if is_done_today else "⬜"
+            if not is_active:
+                status_icon = "⏸️"
+            elif is_done_today:
+                status_icon = "✅"
+            else:
+                status_icon = "⬜"
 
             if remind_time:
                 display_text = f"{status_icon} {title}    ⏰ {remind_time}"
@@ -206,6 +218,7 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(display_text)
             item.setData(1000, task_id)
             item.setData(1001, is_done_today)
+            item.setData(1002, is_active)
             item.setForeground(QColor("#111827"))
 
             self.task_list.addItem(item)
@@ -223,7 +236,49 @@ class MainWindow(QMainWindow):
                 return
 
             database.add_task(title, remind_time)
-            self.tip_label.setText(f"新任务已添加：{title}，提醒时间：{remind_time}")
+
+            if remind_time:
+                self.tip_label.setText(f"新任务已添加：{title}，提醒时间：{remind_time}")
+            else:
+                self.tip_label.setText(f"新任务已添加：{title}，未设置提醒时间")
+
+            self.load_tasks()
+
+    def edit_task(self):
+        current_item = self.task_list.currentItem()
+
+        if current_item is None:
+            QMessageBox.information(self, "提示", "请先选择一个任务。")
+            return
+
+        task_id = current_item.data(1000)
+        task = database.get_task_by_id(task_id)
+
+        if task is None:
+            QMessageBox.warning(self, "错误", "没有找到这个任务，可能已经被删除。")
+            self.load_tasks()
+            return
+
+        dialog = AddTaskDialog(
+            self,
+            title=task["title"],
+            remind_time=task["remind_time"]
+        )
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            title, remind_time = dialog.get_data()
+
+            if not title:
+                QMessageBox.information(self, "提示", "任务名称不能为空。")
+                return
+
+            database.update_task(task_id, title, remind_time)
+
+            if remind_time:
+                self.tip_label.setText(f"任务已更新：{title}，提醒时间：{remind_time}")
+            else:
+                self.tip_label.setText(f"任务已更新：{title}，未设置提醒时间")
+
             self.load_tasks()
 
     def complete_task(self):
@@ -235,6 +290,11 @@ class MainWindow(QMainWindow):
 
         task_id = current_item.data(1000)
         is_done_today = current_item.data(1001)
+        is_active = current_item.data(1002)
+
+        if not is_active:
+            QMessageBox.information(self, "提示", "这个任务已暂停，不能打卡。")
+            return
 
         if is_done_today:
             QMessageBox.information(self, "提示", "这个任务今天已经完成打卡了。")
@@ -246,6 +306,20 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "pet_window"):
             self.pet_window.set_done()
+
+    def toggle_task_active(self):
+        current_item = self.task_list.currentItem()
+
+        if current_item is None:
+            QMessageBox.information(self, "提示", "请先选择一个任务。")
+            return
+
+        task_id = current_item.data(1000)
+
+        database.toggle_task_active(task_id)
+
+        self.tip_label.setText("任务状态已切换。")
+        self.load_tasks()
 
     def delete_task(self):
         current_item = self.task_list.currentItem()
