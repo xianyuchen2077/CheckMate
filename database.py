@@ -1,9 +1,17 @@
 import sqlite3
+import sys
 from pathlib import Path
 from datetime import date, datetime, timedelta
 
 
-DB_DIR = Path("data")
+def get_app_dir():
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+
+    return Path(__file__).resolve().parent
+
+
+DB_DIR = get_app_dir() / "data"
 DB_PATH = DB_DIR / "checkmate.db"
 
 

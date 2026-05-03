@@ -1,5 +1,6 @@
 from pathlib import Path
 import random
+import sys
 
 from PySide6.QtCore import Qt, QPoint, QTimer
 from PySide6.QtGui import QColor, QPixmap, QAction
@@ -13,9 +14,18 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
+def get_base_dir():
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
 
-ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+        if meipass:
+            return Path(meipass)
 
+        return Path(sys.executable).resolve().parent
+
+    return Path(__file__).resolve().parent
+
+ASSETS_DIR = get_base_dir() / "assets"
 
 class PetWindow(QWidget):
     def __init__(self, main_window=None):
