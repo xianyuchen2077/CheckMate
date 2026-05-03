@@ -10,6 +10,7 @@ APP_NAME = "CheckMate"
 PROJECT_DIR = Path(__file__).resolve().parent
 MAIN_FILE = PROJECT_DIR / "main.py"
 ASSETS_DIR = PROJECT_DIR / "assets"
+ICON_FILE = PROJECT_DIR / "assets" / "icons" / "checkmate_icon.ico"
 
 BUILD_DIR = PROJECT_DIR / "build"
 DIST_DIR = PROJECT_DIR / "dist"
@@ -64,37 +65,27 @@ def build_exe():
         sys.executable,
         "-m",
         "PyInstaller",
-
-        # 生成文件夹模式，比 onefile 更适合 PySide6 + 图片资源
         "--onedir",
-
-        # GUI 程序，不显示黑色控制台窗口
         "--windowed",
-
-        # exe 名称
         "--name",
         APP_NAME,
-
-        # 每次覆盖旧 spec
         "--noconfirm",
-
-        # 清理 PyInstaller 缓存
         "--clean",
     ]
 
-    # 把 assets 文件夹打包进去
-    # Windows 下 --add-data 使用 分号 ; 分隔 source 和 dest
+    if ICON_FILE.exists():
+        command.extend(["--icon", str(ICON_FILE)])
+        print(f"将使用程序图标：{ICON_FILE}")
+    else:
+        print("未找到 .ico 图标文件，跳过 exe 图标设置。")
+
     if ASSETS_DIR.exists():
         command.extend([
             "--add-data",
             f"{ASSETS_DIR};assets"
         ])
-        print(f"将打包资源文件夹：{ASSETS_DIR}")
-    else:
-        print("未找到 assets 文件夹，跳过资源打包。")
 
     command.append(str(MAIN_FILE))
-
     run_command(command)
 
 

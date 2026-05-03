@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -44,6 +44,14 @@ def get_background_path():
 
     return None
 
+def get_icon_path():
+    icon_path = get_base_dir() / "assets" / "icons" / "checkmate_icon.png"
+
+    if icon_path.exists():
+        return str(icon_path)
+
+    return None
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -66,6 +74,10 @@ class MainWindow(QMainWindow):
 
         self.reminder_manager = ReminderManager(self, self.tray_manager, self.pet_window)
         self.reminder_manager.start()
+
+        icon_path = get_icon_path()
+        if icon_path:
+            self.setWindowIcon(QIcon(icon_path))
 
     def init_ui(self):
         central_widget = QWidget()

@@ -1,4 +1,7 @@
-from PySide6.QtGui import QAction
+import sys
+from pathlib import Path
+
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QMessageBox,
@@ -8,6 +11,26 @@ from PySide6.QtWidgets import (
 )
 
 import auto_start
+
+def get_base_dir():
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+
+        if meipass:
+            return Path(meipass)
+
+        return Path(sys.executable).resolve().parent
+
+    return Path(__file__).resolve().parent
+
+
+def get_tray_icon():
+    icon_path = get_base_dir() / "assets" / "icons" / "checkmate_icon.png"
+
+    if icon_path.exists():
+        return QIcon(str(icon_path))
+
+    return None
 
 class TrayManager:
     def __init__(self, main_window):
@@ -21,10 +44,15 @@ class TrayManager:
 
         self.tray_icon = QSystemTrayIcon(self.main_window)
 
-        icon = self.main_window.style().standardIcon(
-            QStyle.StandardPixmap.SP_ComputerIcon
-        )
-        self.tray_icon.setIcon(icon)
+        icon = get_tray_icon()
+
+        if icon is not None:
+            self.tray_icon.setIcon(icon)
+        else:
+            fallback_icon = self.main_window.style().standardIcon(
+                QStyle.StandardPixmap.SP_ComputerIcon
+            )
+            self.tray_icon.setIcon(fallback_icon)
 
         tray_menu = QMenu()
 
