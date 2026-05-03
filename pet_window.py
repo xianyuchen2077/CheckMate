@@ -2,8 +2,8 @@ from pathlib import Path
 import random
 import sys
 
-from PySide6.QtCore import Qt, QPoint, QTimer
-from PySide6.QtGui import QColor, QPixmap, QAction
+from PySide6.QtCore import Qt, QPoint, QTimer, QSize
+from PySide6.QtGui import QColor, QPixmap, QAction, QMovie
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
@@ -26,6 +26,9 @@ def get_base_dir():
     return Path(__file__).resolve().parent
 
 ASSETS_DIR = get_base_dir() / "assets"
+# 想要修改文件夹则直接改 PET_SKIN
+PET_SKIN = "Morty"
+PET_ASSETS_DIR = ASSETS_DIR / PET_SKIN
 
 class PetWindow(QWidget):
     def __init__(self, main_window=None):
@@ -37,6 +40,8 @@ class PetWindow(QWidget):
         self.is_reminding = False
         self.is_status_locked = False
         self.press_global_pos = QPoint()
+
+        self.current_skin = "Morty"
 
         self.setMouseTracking(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -52,13 +57,9 @@ class PetWindow(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        self.image_paths = {
-            "idle": ASSETS_DIR / "pet_idle.png",
-            "remind": ASSETS_DIR / "pet_remind.png",
-            "done": ASSETS_DIR / "pet_done.png",
-            "lazy": ASSETS_DIR / "pet_lazy.png",
-            "sleep": ASSETS_DIR / "pet_sleep.png",
-        }
+        self.current_skin = "Morty"
+        self.image_paths = self.build_image_paths()
+        self.current_movie = None
 
         self.idle_messages = [
             "今天不要成为咸鱼",
@@ -159,18 +160,25 @@ class PetWindow(QWidget):
         self.message_timer.start(60 * 1000) # 更改切换频率修改此处
 
     def load_pet_image(self, state_name):
-        image_path = self.image_paths.get(state_name)
+        """
+        根据状态加载宠物图片。
+        优先加载 GIF，找不到 GIF 时加载 PNG。
+        """
+        # 停止之前的 GIF 动画
+        if self.current_movie is not None:
+            self.current_movie.stop()
+            self.current_movie = None
 
-        print(f"[PetWindow] 当前状态：{state_name}")
-        print(f"[PetWindow] 图片路径：{image_path}")
+        image_candidates = self.image_paths.get(state_name, [])
+
+        image_path = None
+        for candidate in image_candidates:
+            if candidate.exists():
+                image_path = candidate
+                break
 
         if image_path is None:
-            print("[PetWindow] 错误：没有找到对应状态的图片路径")
-            self.pet_image.setText("🐟")
-            return
-
-        if not image_path.exists():
-            print(f"[PetWindow] 错误：图片文件不存在：{image_path}")
+            self.pet_image.setPixmap(QPixmap())
             self.pet_image.setText("🐟")
             self.pet_image.setStyleSheet("""
                 font-size: 48px;
@@ -179,14 +187,34 @@ class PetWindow(QWidget):
             """)
             return
 
+        suffix = image_path.suffix.lower()
+
+        # GIF 动画
+        if suffix == ".gif":
+            movie = QMovie(str(image_path))
+
+            if not movie.isValid():
+                self.pet_image.setPixmap(QPixmap())
+                self.pet_image.setText("🐟")
+                return
+
+            movie.setScaledSize(QSize(120, 120))
+
+            self.pet_image.setText("")
+            self.pet_image.setStyleSheet("background-color: transparent;")
+            self.pet_image.setMovie(movie)
+
+            self.current_movie = movie
+            movie.start()
+            return
+
+        # PNG / JPG 静态图片
         pixmap = QPixmap(str(image_path))
 
         if pixmap.isNull():
-            print(f"[PetWindow] 错误：QPixmap 加载失败，可能图片格式不受支持或文件损坏：{image_path}")
+            self.pet_image.setPixmap(QPixmap())
             self.pet_image.setText("🐟")
             return
-
-        print(f"[PetWindow] 图片加载成功：{image_path}")
 
         scaled_pixmap = pixmap.scaled(
             120,
@@ -195,9 +223,44 @@ class PetWindow(QWidget):
             Qt.TransformationMode.SmoothTransformation
         )
 
-        self.pet_image.setStyleSheet("background-color: transparent;")
         self.pet_image.setText("")
+        self.pet_image.setStyleSheet("background-color: transparent;")
         self.pet_image.setPixmap(scaled_pixmap)
+
+    def get_pet_assets_dir(self):
+        return ASSETS_DIR / self.current_skin
+
+
+    def build_image_paths(self):
+        pet_assets_dir = self.get_pet_assets_dir()
+
+        return {
+            "idle": [
+                pet_assets_dir / "pet_idle.gif",
+                pet_assets_dir / "pet_idle.png",
+            ],
+            "remind": [
+                pet_assets_dir / "pet_remind.gif",
+                pet_assets_dir / "pet_remind.png",
+            ],
+            "done": [
+                pet_assets_dir / "pet_done.gif",
+                pet_assets_dir / "pet_done.png",
+            ],
+            "lazy": [
+                pet_assets_dir / "pet_lazy.gif",
+                pet_assets_dir / "pet_lazy.png",
+            ],
+            "sleep": [
+                pet_assets_dir / "pet_sleep.gif",
+                pet_assets_dir / "pet_sleep.png",
+            ],
+        }
+
+    def switch_skin(self, skin_name):
+        self.current_skin = skin_name
+        self.image_paths = self.build_image_paths()
+        self.set_idle()
 
     def move_to_bottom_right(self):
         screen = QApplication.primaryScreen().availableGeometry()
@@ -400,6 +463,13 @@ class PetWindow(QWidget):
         if self.main_window is not None:
             quit_action.triggered.connect(self.main_window.quit_app)
 
+        # 皮肤切换
+        morty_action = QAction("切换为 Morty", self)
+        morty_action.triggered.connect(lambda: self.switch_skin("Morty"))
+
+        rick_action = QAction("切换为 Rick", self)
+        rick_action.triggered.connect(lambda: self.switch_skin("Rick"))
+
         menu.addAction(show_action)
         menu.addAction(progress_action)
         menu.addAction(change_message_action)
@@ -410,6 +480,9 @@ class PetWindow(QWidget):
         menu.addAction(hide_action)
         menu.addSeparator()
         menu.addAction(quit_action)
+        menu.addSeparator()
+        menu.addAction(morty_action)
+        menu.addAction(rick_action)
 
         menu.exec(self.mapToGlobal(position))
 
