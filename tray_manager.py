@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
 )
 
+import auto_start
 
 class TrayManager:
     def __init__(self, main_window):
@@ -33,11 +34,18 @@ class TrayManager:
         show_pet_action = QAction("显示桌面宠物", self.main_window)
         show_pet_action.triggered.connect(self.main_window.show_pet_window)
 
+        self.auto_start_action = QAction("开机自启动", self.main_window)
+        self.auto_start_action.setCheckable(True)
+        self.auto_start_action.setChecked(auto_start.is_auto_start_enabled())
+        self.auto_start_action.triggered.connect(self.toggle_auto_start)
+
         quit_action = QAction("退出程序", self.main_window)
         quit_action.triggered.connect(self.main_window.quit_app)
 
         tray_menu.addAction(show_action)
         tray_menu.addAction(show_pet_action)
+        tray_menu.addSeparator()
+        tray_menu.addAction(self.auto_start_action)
         tray_menu.addSeparator()
         tray_menu.addAction(quit_action)
 
@@ -46,6 +54,33 @@ class TrayManager:
 
         self.tray_icon.setToolTip("CheckMate - 不要成为咸鱼")
         self.tray_icon.show()
+
+    def toggle_auto_start(self, checked):
+        try:
+            if checked:
+                auto_start.enable_auto_start()
+                self.show_message(
+                    "CheckMate",
+                    "已启用开机自启动。",
+                    3000
+                )
+            else:
+                auto_start.disable_auto_start()
+                self.show_message(
+                    "CheckMate",
+                    "已关闭开机自启动。",
+                    3000
+                )
+
+            self.auto_start_action.setChecked(auto_start.is_auto_start_enabled())
+
+        except Exception as e:
+            self.auto_start_action.setChecked(auto_start.is_auto_start_enabled())
+            QMessageBox.warning(
+                self.main_window,
+                "开机自启动设置失败",
+                f"设置开机自启动时出现错误：\n{e}"
+            )
 
     def on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
@@ -65,3 +100,4 @@ class TrayManager:
     def hide(self):
         if self.tray_icon is not None:
             self.tray_icon.hide()
+
