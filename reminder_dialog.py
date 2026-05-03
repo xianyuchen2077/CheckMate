@@ -246,7 +246,7 @@ class SnoozeDialog(QDialog):
         card_layout.setSpacing(8)
         card.setLayout(card_layout)
 
-        title_label = QLabel("你想稍后多久？")
+        title_label = QLabel("你想拖多久？")
         title_label.setObjectName("titleLabel")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label.setFixedHeight(34)
