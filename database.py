@@ -1,6 +1,6 @@
 import sqlite3
 from pathlib import Path
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 
 DB_DIR = Path("data")
@@ -317,3 +317,72 @@ def toggle_task_active(task_id):
 
     conn.commit()
     conn.close()
+
+def get_history_records(days=7):
+    """
+    获取最近 days 天的打卡历史。
+    只显示任务创建日期之后的记录。
+
+    返回结构：
+    [
+        {
+            "date": "2026-05-03",
+            "tasks": [
+                {"title": "背单词", "done": True},
+                {"title": "写代码", "done": False},
+            ]
+        }
+    ]
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, title, created_at
+        FROM tasks
+        ORDER BY id ASC
+    """)
+    tasks = cursor.fetchall()
+
+    history = []
+    today = date.today()
+
+    for offset in range(days):
+        current_date = today - timedelta(days=offset)
+        date_str = current_date.isoformat()
+
+        day_tasks = []
+
+        for task in tasks:
+            created_at = task["created_at"]
+
+            # created_at 通常形如：2026-05-03 12:30:00
+            # 这里只取前 10 位日期部分：2026-05-03
+            created_date = created_at[:10] if created_at else date_str
+
+            # 如果任务是在 current_date 之后创建的，
+            # 那么这一天不显示这个任务
+            if created_date > date_str:
+                continue
+
+            cursor.execute("""
+                SELECT id
+                FROM checkins
+                WHERE task_id = ?
+                  AND checkin_date = ?
+            """, (task["id"], date_str))
+
+            checkin = cursor.fetchone()
+
+            day_tasks.append({
+                "title": task["title"],
+                "done": checkin is not None
+            })
+
+        history.append({
+            "date": date_str,
+            "tasks": day_tasks
+        })
+
+    conn.close()
+    return history

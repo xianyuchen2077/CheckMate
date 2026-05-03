@@ -283,27 +283,50 @@ class PetWindow(QWidget):
             self.load_pet_image("idle")
             self.pet_text.setText(f"今日进度：{done} / {total}")
 
-    def update_by_progress(self, done, total):
-        if self.is_reminding:
+    def update_by_fish_value(self, fish_value, done, total):
+        """
+        根据咸鱼值和今日进度自动切换宠物状态。
+        提醒状态或短暂锁定状态下，不自动覆盖当前状态。
+        """
+        if getattr(self, "is_reminding", False):
+            return
+
+        if getattr(self, "is_status_locked", False):
             return
 
         if total == 0:
             self.load_pet_image("idle")
+            self.set_text_color("#374151")
             self.pet_text.setText("今天还没有任务，可以先添加一个")
             return
 
+        # 今日任务全部完成：优先显示完成状态
+        if done >= total:
+            self.load_pet_image("done")
+            self.set_text_color("#16a34a")
+            self.pet_text.setText("今日任务全部完成，不错")
+            return
+
+        # 今日还没开始：优先显示咸鱼状态
         if done == 0:
             self.load_pet_image("lazy")
+            self.set_text_color("#ea580c")
             self.pet_text.setText(f"今日进度：0 / {total}，先动一下吧")
             return
 
-        if done < total:
+        # 已经完成一部分，但还没全部完成：再根据咸鱼值细分状态
+        if fish_value <= 30:
+            self.load_pet_image("done")
+            self.set_text_color("#16a34a")
+            self.pet_text.setText(f"状态不错！今日进度：{done} / {total}")
+        elif fish_value <= 70:
             self.load_pet_image("idle")
-            self.pet_text.setText(f"今日进度：{done} / {total}，继续推进")
-            return
-
-        self.load_pet_image("done")
-        self.pet_text.setText("今日任务全部完成，不错")
+            self.set_text_color("#374151")
+            self.pet_text.setText(f"继续推进，今日进度：{done} / {total}")
+        else:
+            self.load_pet_image("lazy")
+            self.set_text_color("#ea580c")
+            self.pet_text.setText(f"咸鱼值偏高，再完成一个任务吧：{done} / {total}")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

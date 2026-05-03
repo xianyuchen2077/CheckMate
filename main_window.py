@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 import database
 from add_task_dialog import AddTaskDialog
+from history_dialog import HistoryDialog
 from reminder_manager import ReminderManager
 from styles import MAIN_WINDOW_STYLE
 from tray_manager import TrayManager
@@ -89,19 +90,21 @@ class MainWindow(QMainWindow):
         self.complete_btn = QPushButton("完成打卡")
         self.delete_btn = QPushButton("删除任务")
         self.toggle_active_btn = QPushButton("暂停/启用")
+        self.history_btn = QPushButton("历史记录")
 
         self.add_btn.clicked.connect(self.add_task)
         self.edit_btn.clicked.connect(self.edit_task)
         self.complete_btn.clicked.connect(self.complete_task)
         self.delete_btn.clicked.connect(self.delete_task)
         self.toggle_active_btn.clicked.connect(self.toggle_task_active)
+        self.history_btn.clicked.connect(self.show_history)
 
         button_layout.addWidget(self.add_btn)
         button_layout.addWidget(self.edit_btn)
         button_layout.addWidget(self.complete_btn)
         button_layout.addWidget(self.delete_btn)
         button_layout.addWidget(self.toggle_active_btn)
-
+        button_layout.addWidget(self.history_btn)
         task_layout.addLayout(button_layout)
         left_panel.addWidget(task_card)
 
@@ -170,6 +173,10 @@ class MainWindow(QMainWindow):
             self.pet_window.show()
             self.pet_window.raise_()
             self.pet_window.activateWindow()
+
+    def show_history(self):
+        dialog = HistoryDialog(self)
+        dialog.exec()
 
     def update_pet_progress(self):
         total, done = database.get_today_stats()
@@ -373,4 +380,4 @@ class MainWindow(QMainWindow):
         self.fish_stat.setText(f"咸鱼值：{fish_value}")
 
         if hasattr(self, "pet_window"):
-            self.pet_window.update_by_progress(done, total)
+            self.pet_window.update_by_fish_value(fish_value, done, total)
