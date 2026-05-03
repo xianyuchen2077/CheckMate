@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
     QMenu,
+    QProgressBar,
 )
 
 def get_base_dir():
@@ -130,10 +131,32 @@ class PetWindow(QWidget):
         self.pet_image.setObjectName("petImage")
         self.pet_image.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
-        self.pet_growth_label = QLabel("Lv.1 · 咸鱼苗\nEXP 0 / 120")
-        self.pet_growth_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.pet_growth_label.setObjectName("petGrowthLabel")
-        self.pet_growth_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        # 等级 + 宠物名字，例如：Lv.1 · 咸鱼仔
+        self.pet_level_label = QLabel("Lv.1 · 咸鱼仔")
+        self.pet_level_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pet_level_label.setObjectName("petLevelLabel")
+        self.pet_level_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        # 当前阶段名称，例如：咸鱼苗 / 努力鱼 / 自律鱼
+        self.pet_stage_label = QLabel("咸鱼苗")
+        self.pet_stage_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pet_stage_label.setObjectName("petStageLabel")
+        self.pet_stage_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        # 经验进度条
+        self.pet_exp_bar = QProgressBar()
+        self.pet_exp_bar.setObjectName("petExpBar")
+        self.pet_exp_bar.setRange(0, 100)
+        self.pet_exp_bar.setValue(0)
+        self.pet_exp_bar.setTextVisible(False)
+        self.pet_exp_bar.setFixedHeight(10) # 调整经验条高度
+        self.pet_exp_bar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        # 经验数字，例如：EXP 0 / 120
+        self.pet_exp_label = QLabel("EXP 0 / 120")
+        self.pet_exp_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pet_exp_label.setObjectName("petExpLabel")
+        self.pet_exp_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         self.pet_text = QLabel()
         self.pet_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -143,9 +166,12 @@ class PetWindow(QWidget):
 
         layout = QVBoxLayout()
         layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(6)
+        layout.setSpacing(6) # 调整控件之间的垂直间距
         layout.addWidget(self.pet_image)
-        layout.addWidget(self.pet_growth_label)
+        layout.addWidget(self.pet_level_label)
+        layout.addWidget(self.pet_stage_label)
+        layout.addWidget(self.pet_exp_bar)
+        layout.addWidget(self.pet_exp_label)
         layout.addWidget(self.pet_text)
         self.container.setLayout(layout)
 
@@ -154,7 +180,7 @@ class PetWindow(QWidget):
         outer_layout.addWidget(self.container)
 
         self.setLayout(outer_layout)
-        self.setFixedSize(200, 230) # 调整宠物窗口大小
+        self.setFixedSize(200, 260) # 调整宠物窗口大小
 
         self.setStyleSheet("""
             #petContainer {
@@ -166,11 +192,37 @@ class PetWindow(QWidget):
                 background-color: transparent;
             }
 
-            #petGrowthLabel {
+            #petLevelLabel {
                 font-size: 12px;
-                font-weight: 700;
+                font-weight: 800;
                 color: #2563eb;
                 background-color: transparent;
+            }
+
+            #petStageLabel {
+                font-size: 11px;
+                font-weight: 600;
+                color: #64748b;
+                background-color: transparent;
+            }
+
+            #petExpLabel {
+                font-size: 10px;
+                font-weight: 600;
+                color: #475569;
+                background-color: transparent;
+            }
+
+            #petExpBar {
+                background-color: rgba(226, 232, 240, 180);
+                border: 1px solid rgba(148, 163, 184, 160);
+                border-radius: 5px;
+                text-align: center;
+            }
+
+            #petExpBar::chunk {
+                background-color: #4ade80;
+                border-radius: 5px;
             }
 
             #petText {
@@ -360,17 +412,21 @@ class PetWindow(QWidget):
 
     def refresh_growth_info(self):
         """
-        从数据库读取宠物等级、经验、阶段。
-        如果阶段变化，就切换对应 stage_x 资源目录。
+        从数据库读取宠物等级、经验、阶段，并刷新等级文字和经验条。
         """
         pet = database.get_pet_status()
 
         if pet is None:
             self.current_stage = 1
             self.image_paths = self.build_image_paths()
-            self.pet_growth_label.setText("Lv.1 · 咸鱼苗\nEXP 0 / 120")
+
+            self.pet_level_label.setText("Lv.1 · 咸鱼仔")
+            self.pet_stage_label.setText("咸鱼苗")
+            self.pet_exp_bar.setValue(0)
+            self.pet_exp_label.setText("EXP 0 / 120")
             return
 
+        pet_name = pet["pet_name"]
         level = pet["level"]
         exp = pet["exp"]
         stage = pet["stage"]
@@ -382,10 +438,17 @@ class PetWindow(QWidget):
         stage_name = pet_growth.get_stage_name(stage)
         required_exp = pet_growth.get_required_exp(level)
 
-        self.pet_growth_label.setText(
-            f"Lv.{level} · {stage_name}\n"
-            f"EXP {exp} / {required_exp}"
-        )
+        if required_exp <= 0:
+            progress_percent = 0
+        else:
+            progress_percent = int(exp / required_exp * 100)
+
+        progress_percent = max(0, min(progress_percent, 100))
+
+        self.pet_level_label.setText(f"Lv.{level} · {pet_name}")
+        self.pet_stage_label.setText(stage_name)
+        self.pet_exp_bar.setValue(progress_percent)
+        self.pet_exp_label.setText(f"EXP {exp} / {required_exp}")
 
     def set_idle(self):
         self.is_reminding = False
