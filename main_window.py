@@ -39,7 +39,7 @@ def get_base_dir():
     return Path(__file__).resolve().parent
 
 def get_background_path():
-    background_path = get_base_dir() / "assets" / "background/1.png"
+    background_path = get_base_dir() / "assets" / "backgrounds/main_bg.png"
 
     if background_path.exists():
         return str(background_path).replace("\\", "/")

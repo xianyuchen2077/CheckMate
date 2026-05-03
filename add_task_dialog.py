@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+
 from PySide6.QtCore import QTime
 from PySide6.QtWidgets import (
     QDialog,
@@ -8,16 +11,55 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QCheckBox,
     QTextEdit,
+    QWidget,
 )
 
-from styles import ADD_TASK_DIALOG_STYLE
+from styles import get_add_task_dialog_style
+
+def get_base_dir():
+    """
+    获取项目基础目录。
+    开发环境：项目根目录
+    打包环境：exe 所在目录或 PyInstaller 临时目录
+    """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+
+        if meipass:
+            return Path(meipass)
+
+        return Path(sys.executable).resolve().parent
+
+    return Path(__file__).resolve().parent
+
+
+def get_add_task_background_path():
+    """
+    获取添加任务弹窗背景图片路径。
+
+    当前默认路径：
+        assets/backgrounds/add_task_bg.png
+
+    如果图片不存在，返回 None。
+    styles.py 会自动使用浅灰色背景。
+    """
+    background_path = get_base_dir() / "assets" / "backgrounds" / "add_task_bg.png"
+
+    if background_path.exists():
+        return str(background_path).replace("\\", "/")
+
+    return None
 
 class AddTaskDialog(QDialog):
     def __init__(self, parent=None, title="", remind_time=None, description=""):
         super().__init__(parent)
 
         self.setWindowTitle("添加任务" if not title else "编辑任务")
-        self.resize(380, 210)
+        # 固定尺寸，避免拖动或重绘时布局变形
+        # 当前比例约为 1240:693
+        self.setFixedSize(590, 330)
+        self.setMinimumSize(590, 330)
+        self.setMaximumSize(590, 330)
 
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("例如：背英语单词 30 个")
@@ -58,12 +100,23 @@ class AddTaskDialog(QDialog):
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
 
+        background_widget = QWidget()
+        background_widget.setObjectName("addTaskBackground")
+
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(22, 20, 22, 18)
+        main_layout.setSpacing(12)
         main_layout.addLayout(form_layout)
         main_layout.addWidget(self.button_box)
 
-        self.setLayout(main_layout)
-        self.setStyleSheet(ADD_TASK_DIALOG_STYLE)
+        background_widget.setLayout(main_layout)
+
+        outer_layout = QVBoxLayout()
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.addWidget(background_widget)
+
+        self.setLayout(outer_layout)
+        self.setStyleSheet(get_add_task_dialog_style(get_add_task_background_path()))
 
     def on_time_checkbox_changed(self):
         self.time_edit.setEnabled(self.enable_time_checkbox.isChecked())
