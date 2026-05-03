@@ -9,7 +9,9 @@ APP_NAME = "CheckMate"
 PROJECT_DIR = Path(__file__).resolve().parent
 MAIN_FILE = PROJECT_DIR / "main.py"
 ASSETS_DIR = PROJECT_DIR / "assets"
-ICON_FILE = PROJECT_DIR / "assets" / "icons" / "checkmate_icon.ico"
+
+ICON_PNG_FILE = PROJECT_DIR / "assets" / "icons" / "checkmate_icon.png"
+ICON_ICO_FILE = PROJECT_DIR / "assets" / "icons" / "checkmate_icon.ico"
 
 # PyInstaller 临时构建目录
 BUILD_DIR = PROJECT_DIR / "build"
@@ -50,6 +52,55 @@ def ensure_pyinstaller():
         print("未检测到 PyInstaller，正在安装...")
         run_command([sys.executable, "-m", "pip", "install", "-U", "pyinstaller"])
 
+def ensure_icon_file():
+    """
+    确保存在 exe 可用的 .ico 图标。
+
+    开发时主要维护：
+        assets/icons/checkmate_icon.png
+
+    打包时自动生成：
+        assets/icons/checkmate_icon.ico
+
+    说明：
+        Windows exe 图标建议使用 .ico。
+        PyInstaller 的 --icon 虽然有时可以接收部分图片格式，
+        但 .ico 是最稳的。
+    """
+    if ICON_ICO_FILE.exists():
+        print(f"已找到 ico 图标：{ICON_ICO_FILE}")
+        return
+
+    if not ICON_PNG_FILE.exists():
+        print("未找到 PNG 图标，也未找到 ICO 图标，跳过 exe 图标设置。")
+        return
+
+    try:
+        from PIL import Image
+    except ImportError:
+        print("未检测到 Pillow，正在安装...")
+        run_command([sys.executable, "-m", "pip", "install", "pillow"])
+        from PIL import Image
+
+    ICON_ICO_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    image = Image.open(ICON_PNG_FILE).convert("RGBA")
+
+    image.save(
+        ICON_ICO_FILE,
+        format="ICO",
+        sizes=[
+            (16, 16),
+            (24, 24),
+            (32, 32),
+            (48, 48),
+            (64, 64),
+            (128, 128),
+            (256, 256),
+        ]
+    )
+
+    print(f"已根据 PNG 生成 ico 图标：{ICON_ICO_FILE}")
 
 def clean_old_build():
     print("\n清理旧打包文件...")
@@ -95,9 +146,9 @@ def build_exe():
         str(RELEASE_DIR),
     ]
 
-    if ICON_FILE.exists():
-        command.extend(["--icon", str(ICON_FILE)])
-        print(f"将使用程序图标：{ICON_FILE}")
+    if ICON_ICO_FILE.exists():
+        command.extend(["--icon", str(ICON_ICO_FILE)])
+        print(f"将使用程序图标：{ICON_ICO_FILE}")
     else:
         print("未找到 .ico 图标文件，跳过 exe 图标设置。")
 
@@ -162,6 +213,7 @@ def main():
 
     check_main_file()
     ensure_pyinstaller()
+    ensure_icon_file()
     clean_old_build()
     build_exe()
     check_build_result()
