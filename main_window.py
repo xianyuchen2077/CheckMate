@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,10 +21,28 @@ import database
 from add_task_dialog import AddTaskDialog
 from history_dialog import HistoryDialog
 from reminder_manager import ReminderManager
-from styles import MAIN_WINDOW_STYLE
+from styles import get_main_window_style
 from tray_manager import TrayManager
 from pet_window import PetWindow
 
+def get_base_dir():
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+
+        if meipass:
+            return Path(meipass)
+
+        return Path(sys.executable).resolve().parent
+
+    return Path(__file__).resolve().parent
+
+def get_background_path():
+    background_path = get_base_dir() / "assets" / "background/1.png"
+
+    if background_path.exists():
+        return str(background_path).replace("\\", "/")
+
+    return None
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -48,6 +69,7 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         central_widget = QWidget()
+        central_widget.setObjectName("mainBackground")
         self.setCentralWidget(central_widget)
 
         main_layout = QHBoxLayout()
@@ -186,7 +208,7 @@ class MainWindow(QMainWindow):
         self.pet_window.show()
 
     def apply_styles(self):
-        self.setStyleSheet(MAIN_WINDOW_STYLE)
+        self.setStyleSheet(get_main_window_style(get_background_path()))
 
     def show_main_window(self):
         self.show()
