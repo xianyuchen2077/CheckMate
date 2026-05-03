@@ -30,10 +30,14 @@ class TrayManager:
         show_action = QAction("显示主窗口", self.main_window)
         show_action.triggered.connect(self.main_window.show_main_window)
 
+        show_pet_action = QAction("显示桌面宠物", self.main_window)
+        show_pet_action.triggered.connect(self.main_window.show_pet_window)
+
         quit_action = QAction("退出程序", self.main_window)
         quit_action.triggered.connect(self.main_window.quit_app)
 
         tray_menu.addAction(show_action)
+        tray_menu.addAction(show_pet_action)
         tray_menu.addSeparator()
         tray_menu.addAction(quit_action)
 

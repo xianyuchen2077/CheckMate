@@ -165,6 +165,21 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
+    def show_pet_window(self):
+        if hasattr(self, "pet_window"):
+            self.pet_window.show()
+            self.pet_window.raise_()
+            self.pet_window.activateWindow()
+
+    def update_pet_progress(self):
+        total, done = database.get_today_stats()
+
+        if hasattr(self, "pet_window"):
+            self.pet_window.set_progress(done, total)
+            self.pet_window.show()
+            self.pet_window.raise_()
+            self.pet_window.activateWindow()
+
     def quit_app(self):
         self.force_quit = True
 
