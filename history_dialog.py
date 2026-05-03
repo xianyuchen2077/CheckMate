@@ -93,6 +93,9 @@ class HistoryDialog(QDialog):
                     icon = "✅" if task["done"] else "❌"
                     lines.append(f"  {icon} {task['title']}")
 
+                    if task.get("description"):
+                        lines.append(f"     备注：{task['description']}")
+
             lines.append("")
 
         self.history_text.setPlainText("\n".join(lines))

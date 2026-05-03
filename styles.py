@@ -148,7 +148,7 @@ QCheckBox::indicator {
     height: 16px;
 }
 
-QLineEdit, QTimeEdit {
+QLineEdit, QTimeEdit, QTextEdit {
     background-color: #ffffff;
     color: #111827;
     border: 1px solid #d1d5db;

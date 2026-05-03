@@ -23,6 +23,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
+            description TEXT,
             remind_time TEXT,
             is_active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -43,6 +44,12 @@ def init_db():
         cursor.execute("""
             ALTER TABLE tasks
             ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1
+        """)
+
+    if "description" not in columns:
+        cursor.execute("""
+            ALTER TABLE tasks
+            ADD COLUMN description TEXT
         """)
 
     # 打卡记录表：保存每天的完成记录
@@ -103,15 +110,14 @@ def get_all_tasks_with_today_status():
 
     return tasks
 
-
-def add_task(title, remind_time=None):
+def add_task(title, remind_time=None, description=None):
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
-        INSERT INTO tasks (title, remind_time)
-        VALUES (?, ?)
-    """, (title, remind_time))
+        INSERT INTO tasks (title, remind_time, description)
+        VALUES (?, ?, ?)
+    """, (title, remind_time, description))
 
     conn.commit()
     conn.close()
@@ -121,7 +127,7 @@ def get_task_by_id(task_id):
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT id, title, remind_time, created_at, is_active
+        SELECT id, title, remind_time, description, created_at, is_active
         FROM tasks
         WHERE id = ?
     """, (task_id,))
@@ -131,16 +137,15 @@ def get_task_by_id(task_id):
 
     return task
 
-
-def update_task(task_id, title, remind_time):
+def update_task(task_id, title, remind_time, description=None):
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
         UPDATE tasks
-        SET title = ?, remind_time = ?
+        SET title = ?, remind_time = ?, description = ?
         WHERE id = ?
-    """, (title, remind_time, task_id))
+    """, (title, remind_time, description, task_id))
 
     conn.commit()
     conn.close()
@@ -338,7 +343,7 @@ def get_history_records(days=7):
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT id, title, created_at
+        SELECT id, title, description, created_at
         FROM tasks
         ORDER BY id ASC
     """)
@@ -376,6 +381,7 @@ def get_history_records(days=7):
 
             day_tasks.append({
                 "title": task["title"],
+                "description": task["description"],
                 "done": checkin is not None
             })
 

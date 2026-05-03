@@ -7,12 +7,13 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QVBoxLayout,
     QCheckBox,
+    QTextEdit,
 )
 
 from styles import ADD_TASK_DIALOG_STYLE
 
 class AddTaskDialog(QDialog):
-    def __init__(self, parent=None, title="", remind_time=None):
+    def __init__(self, parent=None, title="", remind_time=None, description=""):
         super().__init__(parent)
 
         self.setWindowTitle("添加任务" if not title else "编辑任务")
@@ -21,6 +22,11 @@ class AddTaskDialog(QDialog):
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("例如：背英语单词 30 个")
         self.title_edit.setText(title)
+
+        self.description_edit = QTextEdit()
+        self.description_edit.setPlaceholderText("任务描述（可选）")
+        self.description_edit.setMaximumHeight(70)
+        self.description_edit.setText(description or "")
 
         self.enable_time_checkbox = QCheckBox("设置提醒时间")
 
@@ -40,6 +46,7 @@ class AddTaskDialog(QDialog):
 
         form_layout = QFormLayout()
         form_layout.addRow("任务名称：", self.title_edit)
+        form_layout.addRow("备注说明：", self.description_edit)
         form_layout.addRow("", self.enable_time_checkbox)
         form_layout.addRow("提醒时间：", self.time_edit)
 
@@ -63,10 +70,11 @@ class AddTaskDialog(QDialog):
 
     def get_data(self):
         title = self.title_edit.text().strip()
+        description = self.description_edit.toPlainText().strip()
 
         if self.enable_time_checkbox.isChecked():
             remind_time = self.time_edit.time().toString("HH:mm")
         else:
             remind_time = None
 
-        return title, remind_time
+        return title, remind_time, description

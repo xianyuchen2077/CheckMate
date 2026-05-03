@@ -251,13 +251,13 @@ class MainWindow(QMainWindow):
         dialog = AddTaskDialog(self)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            title, remind_time = dialog.get_data()
+            title, remind_time, description = dialog.get_data()
 
             if not title:
                 QMessageBox.information(self, "提示", "任务名称不能为空。")
                 return
 
-            database.add_task(title, remind_time)
+            database.add_task(title, remind_time, description)
 
             if remind_time:
                 self.tip_label.setText(f"新任务已添加：{title}，提醒时间：{remind_time}")
@@ -284,17 +284,18 @@ class MainWindow(QMainWindow):
         dialog = AddTaskDialog(
             self,
             title=task["title"],
-            remind_time=task["remind_time"]
+            remind_time=task["remind_time"],
+            description=task["description"]
         )
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            title, remind_time = dialog.get_data()
+            title, remind_time, description = dialog.get_data()
 
             if not title:
                 QMessageBox.information(self, "提示", "任务名称不能为空。")
                 return
 
-            database.update_task(task_id, title, remind_time)
+            database.update_task(task_id, title, remind_time, description)
 
             if remind_time:
                 self.tip_label.setText(f"任务已更新：{title}，提醒时间：{remind_time}")
