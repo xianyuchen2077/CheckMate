@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from datetime import date, datetime, timedelta
 
+from pet_system import pet_growth
 
 def get_app_dir():
     if getattr(sys, "frozen", False):
@@ -71,6 +72,46 @@ def init_db():
             UNIQUE(task_id, checkin_date)
         )
     """)
+
+    # 宠物状态表：保存宠物等级、经验和进化阶段
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pet_status (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            pet_name TEXT NOT NULL,
+            skin TEXT NOT NULL,
+            level INTEGER NOT NULL DEFAULT 1,
+            exp INTEGER NOT NULL DEFAULT 0,
+            stage INTEGER NOT NULL DEFAULT 1,
+            mood TEXT NOT NULL DEFAULT 'idle',
+            total_tasks_done INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 第一版只养一只宠物，所以固定 id = 1
+    cursor.execute("""
+        INSERT OR IGNORE INTO pet_status (
+            id,
+            pet_name,
+            skin,
+            level,
+            exp,
+            stage,
+            mood,
+            total_tasks_done
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        1,
+        pet_growth.DEFAULT_PET_NAME,
+        pet_growth.DEFAULT_PET_SKIN,
+        1,
+        0,
+        1,
+        "idle",
+        0
+    ))
 
     conn.commit()
     conn.close()
@@ -400,3 +441,126 @@ def get_history_records(days=7):
 
     conn.close()
     return history
+
+def get_pet_status():
+    """
+    获取当前宠物状态。
+    第一版只支持一只宠物，所以固定查询 id = 1。
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT
+            id,
+            pet_name,
+            skin,
+            level,
+            exp,
+            stage,
+            mood,
+            total_tasks_done,
+            created_at,
+            updated_at
+        FROM pet_status
+        WHERE id = 1
+    """)
+
+    pet_status = cursor.fetchone()
+    conn.close()
+
+    return pet_status
+
+def update_pet_status(level, exp, stage, mood=None, total_tasks_done=None):
+    """
+    更新宠物状态。
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    if mood is not None and total_tasks_done is not None:
+        cursor.execute("""
+            UPDATE pet_status
+            SET level = ?,
+                exp = ?,
+                stage = ?,
+                mood = ?,
+                total_tasks_done = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+        """, (level, exp, stage, mood, total_tasks_done))
+
+    elif mood is not None:
+        cursor.execute("""
+            UPDATE pet_status
+            SET level = ?,
+                exp = ?,
+                stage = ?,
+                mood = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+        """, (level, exp, stage, mood))
+
+    elif total_tasks_done is not None:
+        cursor.execute("""
+            UPDATE pet_status
+            SET level = ?,
+                exp = ?,
+                stage = ?,
+                total_tasks_done = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+        """, (level, exp, stage, total_tasks_done))
+
+    else:
+        cursor.execute("""
+            UPDATE pet_status
+            SET level = ?,
+                exp = ?,
+                stage = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+        """, (level, exp, stage))
+
+    conn.commit()
+    conn.close()
+
+def save_pet_status(
+    pet_name,
+    skin,
+    level,
+    exp,
+    stage,
+    mood,
+    total_tasks_done
+):
+    """
+    保存宠物完整状态。
+    第一版只支持一只宠物，所以固定更新 id = 1。
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        UPDATE pet_status
+        SET pet_name = ?,
+            skin = ?,
+            level = ?,
+            exp = ?,
+            stage = ?,
+            mood = ?,
+            total_tasks_done = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = 1
+    """, (
+        pet_name,
+        skin,
+        level,
+        exp,
+        stage,
+        mood,
+        total_tasks_done
+    ))
+
+    conn.commit()
+    conn.close()
