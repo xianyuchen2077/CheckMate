@@ -13,7 +13,37 @@
 
 import database
 
+# ============================================================
+# 默认宠物配置
+# ============================================================
+#
+# DEFAULT_PET_SKIN:
+#     当前默认宠物皮肤 ID。
+#
+#     它需要和资源文件夹名称保持一致。
+#
+#     例如：
+#         DEFAULT_PET_SKIN = "salty_fish"
+#
+#     对应资源目录：
+#         assets/icons/pets/salty_fish/
+#
+#     如果以后你新增了其他宠物，例如：
+#         assets/icons/pets/cat/
+#         assets/icons/pets/rabbit/
+#
+#     那么可以把这里改成：
+#         DEFAULT_PET_SKIN = "cat"
+#
 DEFAULT_PET_SKIN = "salty_fish"
+
+
+# DEFAULT_PET_NAME:
+#     宠物默认显示名称。
+#
+#     这个名字会写入数据库 pet_status 表中。
+#     后续如果做“给宠物改名”功能，可以从数据库读取并修改。
+#
 DEFAULT_PET_NAME = "咸鱼仔"
 
 def get_required_exp(level):
@@ -33,12 +63,46 @@ def get_required_exp(level):
 
 def calculate_stage(level):
     """
-    根据等级计算宠物进化阶段。
+    根据宠物等级计算进化阶段。
 
-    Stage 1: Lv.1 - Lv.4
-    Stage 2: Lv.5 - Lv.9
-    Stage 3: Lv.10 - Lv.19
-    Stage 4: Lv.20+
+    当前阶段设计：
+
+        Stage 1: Lv.1  - Lv.4
+            名称：咸鱼苗
+            说明：初始阶段，刚开始努力。
+
+        Stage 2: Lv.5  - Lv.9
+            名称：努力鱼
+            说明：已经开始形成习惯。
+
+        Stage 3: Lv.10 - Lv.19
+            名称：自律鱼
+            说明：坚持较稳定，进入自律状态。
+
+        Stage 4: Lv.20+
+            名称：时间管理大师鱼
+            说明：长期坚持后的最终阶段。
+
+    注意：
+        这里返回的是数字阶段：
+            1 / 2 / 3 / 4
+
+        资源文件夹中建议对应：
+            stage_1/
+            stage_2/
+            stage_3/
+            stage_4/
+
+        例如：
+            assets/icons/pets/salty_fish/stage_1/
+            assets/icons/pets/salty_fish/stage_2/
+            assets/icons/pets/salty_fish/stage_3/
+            assets/icons/pets/salty_fish/stage_4/
+
+    后续如果想增加更多进化阶段，可以同时修改：
+        1. calculate_stage()
+        2. get_stage_name()
+        3. 对应的资源文件夹
     """
     if level >= 20:
         return 4
@@ -54,7 +118,22 @@ def calculate_stage(level):
 
 def get_stage_name(stage):
     """
-    获取进化阶段名称。
+    根据阶段编号返回阶段名称。
+
+    阶段编号和名称对应关系：
+
+        1 -> 咸鱼苗
+        2 -> 努力鱼
+        3 -> 自律鱼
+        4 -> 时间管理大师鱼
+
+    这个名称主要用于：
+        1. 宠物窗口显示
+        2. 升级 / 进化提示
+        3. 后续宠物详情页面
+
+    如果你想改阶段名字，例如把“咸鱼苗”改成“小咸鱼”，
+    只需要修改下面这个字典。
     """
     stage_names = {
         1: "咸鱼苗",

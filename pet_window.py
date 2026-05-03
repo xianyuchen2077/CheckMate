@@ -18,6 +18,11 @@ from PySide6.QtWidgets import (
 )
 
 def get_base_dir():
+    """
+    获取项目资源基础目录。
+    开发环境：项目根目录
+    打包环境：exe 所在目录或 PyInstaller 临时目录
+    """
     if getattr(sys, "frozen", False):
         meipass = getattr(sys, "_MEIPASS", None)
 
@@ -28,10 +33,11 @@ def get_base_dir():
 
     return Path(__file__).resolve().parent
 
+# assets 根目录
 ASSETS_DIR = get_base_dir() / "assets"
-# 想要修改文件夹则直接改 PET_SKIN
-PET_SKIN = "Morty"
-PET_ASSETS_DIR = ASSETS_DIR / PET_SKIN
+
+# 宠物资源目录：assets/pets/
+PETS_DIR = ASSETS_DIR / "pets"
 
 class PetWindow(QWidget):
     def __init__(self, main_window=None):
@@ -43,8 +49,6 @@ class PetWindow(QWidget):
         self.is_reminding = False
         self.is_status_locked = False
         self.press_global_pos = QPoint()
-
-        self.current_skin = "Morty"
 
         self.setMouseTracking(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -60,8 +64,19 @@ class PetWindow(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        self.current_skin = "Morty"
+        # 当前宠物皮肤，对应 assets/pets/salty_fish/
+        self.current_skin = "salty_fish"
+
+        # 当前进化阶段，对应 stage_1 / stage_2 / stage_3 / stage_4
+        self.current_stage = 1
+
+        # 当前宠物状态图片路径
         self.image_paths = self.build_image_paths()
+
+        # Debug:输出资源调试信息，帮助开发时确认资源路径和存在性
+        # self.print_resource_debug_info()
+
+        # 当前 GIF 动画对象，必须保存引用，否则动画可能不播放
         self.current_movie = None
 
         self.idle_messages = [
@@ -161,7 +176,7 @@ class PetWindow(QWidget):
             #petText {
                 font-size: 13px;
                 font-weight: 600;
-                color: {color};
+                color: #111827;
                 background-color: transparent;
             }
         """)
@@ -178,7 +193,7 @@ class PetWindow(QWidget):
     def load_pet_image(self, state_name):
         """
         根据状态加载宠物图片。
-        优先加载 GIF，找不到 GIF 时加载 PNG。
+        支持 gif 动画和 png 静态图。
         """
         # 停止之前的 GIF 动画
         if self.current_movie is not None:
@@ -193,6 +208,7 @@ class PetWindow(QWidget):
                 image_path = candidate
                 break
 
+        # 找不到资源时，回退显示 emoji
         if image_path is None:
             self.pet_image.setPixmap(QPixmap())
             self.pet_image.setText("🐟")
@@ -244,10 +260,24 @@ class PetWindow(QWidget):
         self.pet_image.setPixmap(scaled_pixmap)
 
     def get_pet_assets_dir(self):
-        return ASSETS_DIR / self.current_skin
+        """
+        获取当前宠物资源目录。
+        优先使用 stage_x 文件夹；如果没有，则回退到皮肤根目录。
+        """
+        staged_dir = PETS_DIR / self.current_skin / f"stage_{self.current_stage}"
+        fallback_dir = PETS_DIR / self.current_skin
+
+        if staged_dir.exists():
+            return staged_dir
+
+        return fallback_dir
 
 
     def build_image_paths(self):
+        """
+        构建宠物各状态图片路径。
+        每个状态优先加载 gif，没有 gif 再加载 png。
+        """
         pet_assets_dir = self.get_pet_assets_dir()
 
         return {
@@ -274,7 +304,20 @@ class PetWindow(QWidget):
         }
 
     def switch_skin(self, skin_name):
+        """
+        切换宠物皮肤。
+        skin_name 必须对应 assets/icons/pets/ 下的文件夹名。
+        """
         self.current_skin = skin_name
+        self.image_paths = self.build_image_paths()
+        self.set_idle()
+
+    def switch_stage(self, stage):
+        """
+        切换宠物进化阶段。
+        stage=1 对应 stage_1，stage=2 对应 stage_2。
+        """
+        self.current_stage = stage
         self.image_paths = self.build_image_paths()
         self.set_idle()
 
@@ -528,3 +571,14 @@ class PetWindow(QWidget):
         if self.main_window is not None:
             self.main_window.show_main_window()
 
+    def print_resource_debug_info(self):
+        print("[PetWindow] ASSETS_DIR:", ASSETS_DIR)
+        print("[PetWindow] PETS_DIR:", PETS_DIR)
+        print("[PetWindow] current_skin:", self.current_skin)
+        print("[PetWindow] current_stage:", self.current_stage)
+        print("[PetWindow] pet_assets_dir:", self.get_pet_assets_dir())
+        print("[PetWindow] image_paths:")
+        for state, paths in self.image_paths.items():
+            print(f"  {state}:")
+            for path in paths:
+                print(f"    {path} exists={path.exists()}")
