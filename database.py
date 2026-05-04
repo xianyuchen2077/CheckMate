@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import date, datetime, timedelta
 
 from pet_system import pet_growth
+from data_guard.integrity_manager import refresh_integrity_record
 
 def get_app_dir():
     if getattr(sys, "frozen", False):
@@ -188,6 +189,8 @@ def add_task(title, remind_time=None, description=None, repeat_interval_minutes=
     conn.commit()
     conn.close()
 
+    refresh_integrity_after_db_change()
+
 def get_task_by_id(task_id):
     conn = get_connection()
     cursor = conn.cursor()
@@ -238,6 +241,8 @@ def update_task(
     conn.commit()
     conn.close()
 
+    refresh_integrity_after_db_change()
+
 def delete_task(task_id):
     conn = get_connection()
     cursor = conn.cursor()
@@ -257,6 +262,7 @@ def delete_task(task_id):
     conn.commit()
     conn.close()
 
+    refresh_integrity_after_db_change()
 
 def mark_task_done_today(task_id):
     """
@@ -280,6 +286,9 @@ def mark_task_done_today(task_id):
 
     conn.commit()
     conn.close()
+
+    if is_new_checkin:
+        refresh_integrity_after_db_change()
 
     return is_new_checkin
 
@@ -428,6 +437,8 @@ def toggle_task_active(task_id):
 
     conn.commit()
     conn.close()
+
+    refresh_integrity_after_db_change()
 
 def get_history_records(days=7):
     """
@@ -582,6 +593,8 @@ def update_pet_status(level, exp, stage, mood=None, total_tasks_done=None):
     conn.commit()
     conn.close()
 
+    refresh_integrity_after_db_change()
+
 def save_pet_status(
     pet_name,
     skin,
@@ -621,6 +634,8 @@ def save_pet_status(
 
     conn.commit()
     conn.close()
+
+    refresh_integrity_after_db_change()
 
 def is_task_done_today(task_id):
     """
@@ -664,3 +679,15 @@ def is_task_active(task_id):
         return False
 
     return row["is_active"] == 1
+
+def refresh_integrity_after_db_change():
+    """
+    数据库发生正常写入后，刷新完整性记录。
+
+    如果当前数据库处于可疑状态，
+    integrity_manager 会自动跳过刷新。
+    """
+    try:
+        refresh_integrity_record()
+    except Exception as e:
+        print("刷新数据库完整性记录失败：", e)

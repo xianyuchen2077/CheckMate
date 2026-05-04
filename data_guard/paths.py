@@ -64,3 +64,8 @@ def get_data_guard_root_dir():
     """
     return get_backup_dir()
 
+def get_integrity_file_path():
+    """
+    获取数据库完整性校验文件路径。
+    """
+    return get_app_dir() / "integrity.json"

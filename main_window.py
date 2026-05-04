@@ -30,8 +30,14 @@ from pet_system import pet_growth
 from pet_growth_dialog import PetGrowthDialog
 from data_guard.backup_manager import (
     create_auto_backup,
+    create_suspicious_backup,
     create_manual_backup,
     get_backup_folder_path,
+)
+from data_guard.integrity_manager import (
+    check_integrity,
+    refresh_integrity_record,
+    lock_integrity_updates,
 )
 
 def get_base_dir():
@@ -67,12 +73,40 @@ class MainWindow(QMainWindow):
 
         database.init_db()
 
-        # 启动时自动备份数据库
-        create_auto_backup()
+        integrity_result = check_integrity()
+        integrity_status = integrity_result["status"]
 
-        # Debug: 输出备份文件夹路径和最新自动备份信息，验证备份功能是否正常
-        backup_path = create_auto_backup()
-        print("自动备份结果：", backup_path)
+        if integrity_status == "changed":
+            print("数据完整性警告：", integrity_result["message"])
+            print("旧 hash：", integrity_result["old_hash"])
+            print("当前 hash：", integrity_result["current_hash"])
+
+            suspicious_backup_path = create_suspicious_backup()
+            print("已备份可疑数据库：", suspicious_backup_path)
+
+            lock_integrity_updates()
+
+            # 检测到异常：
+            # 1. 不创建普通自动备份
+            # 2. 不刷新完整性记录
+            # 3. 后续由用户决定是否恢复或信任当前数据
+
+        elif integrity_status == "db_missing":
+            print("数据完整性警告：", integrity_result["message"])
+
+        elif integrity_status == "missing_record":
+            print("数据完整性：", integrity_result["message"])
+
+            backup_path = create_auto_backup()
+            print("自动备份结果：", backup_path)
+
+            refresh_integrity_record()
+
+        else:
+            backup_path = create_auto_backup()
+            print("自动备份结果：", backup_path)
+
+            refresh_integrity_record()
 
         self.setWindowTitle("CheckMate - 不要成为咸鱼")
         self.resize(1050, 700)

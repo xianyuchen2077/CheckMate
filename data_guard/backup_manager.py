@@ -14,6 +14,7 @@ from data_guard.paths import (
 AUTO_BACKUP_PREFIX = "auto"
 MANUAL_BACKUP_PREFIX = "manual"
 MAX_AUTO_BACKUPS = 10
+SUSPICIOUS_BACKUP_PREFIX = "suspicious"
 
 
 def get_timestamp():
@@ -136,3 +137,13 @@ def get_backup_folder_path():
     """
     ensure_data_guard_dirs()
     return get_backup_dir()
+
+def create_suspicious_backup():
+    """
+    创建可疑数据库备份。
+
+    当完整性检查发现数据库可能被外部修改时，
+    不应该立刻刷新 integrity.json，
+    而是先把当前数据库保存为 suspicious 备份。
+    """
+    return create_backup(SUSPICIOUS_BACKUP_PREFIX)
