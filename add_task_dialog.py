@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTime
+from PySide6.QtCore import QTime, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QCheckBox,
     QWidget,
+    QLabel,
 )
 
 from styles import get_add_task_dialog_style
@@ -136,12 +137,32 @@ class AddTaskDialog(QDialog):
         self.enable_time_checkbox.stateChanged.connect(self.on_time_checkbox_changed)
 
         form_layout = QFormLayout()
-        form_layout.setSpacing(12)
-        form_layout.addRow("任务名称：", self.title_edit)
-        form_layout.addRow("备注说明：", self.description_edit)
+
+        # 左侧文字放在对应输入框的正左边，并垂直居中
+        form_layout.setLabelAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+
+        # 右侧控件靠左排列
+        form_layout.setFormAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+
+        # 左侧文字和右侧输入框之间的距离
+        form_layout.setHorizontalSpacing(10)
+
+        # 每一行之间的上下距离
+        form_layout.setVerticalSpacing(12)
+        name_label = self.create_form_label("任务名称：", offset_y=0)
+        description_label = self.create_form_label("备注说明：", offset_y=12)
+        time_label = self.create_form_label("提醒时间：", offset_y=4)
+        repeat_label = self.create_form_label("重复提醒：", offset_y=54)
+
+        form_layout.addRow(name_label, self.title_edit)
+        form_layout.addRow(description_label, self.description_edit)
         form_layout.addRow("", self.enable_time_checkbox)
-        form_layout.addRow("提醒时间：", time_control_layout)
-        form_layout.addRow("重复提醒：", self.repeat_widget)
+        form_layout.addRow(time_label, time_control_layout)
+        form_layout.addRow(repeat_label, self.repeat_widget)
 
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
@@ -168,6 +189,20 @@ class AddTaskDialog(QDialog):
 
         self.setLayout(outer_layout)
         self.setStyleSheet(get_add_task_dialog_style(get_add_task_background_path()))
+
+    def create_form_label(self, text, offset_y=0):
+        """
+        创建表单左侧文字。
+
+        offset_y:
+            控制文字上下平移。
+            正数：向下移动
+            负数：向上移动
+        """
+        label = QLabel(text)
+        label.setObjectName("formLabel")
+        label.setContentsMargins(0, offset_y, 0, 0)
+        return label
 
     def on_time_checkbox_changed(self):
         enabled = self.enable_time_checkbox.isChecked()
