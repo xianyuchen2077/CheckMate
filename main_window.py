@@ -29,6 +29,7 @@ from pet_window import PetWindow
 from pet_system import pet_growth
 from pet_growth_dialog import PetGrowthDialog
 from data_guard.startup_guard import run_startup_data_guard
+from data_guard.migration_manager import migrate_legacy_database_if_needed
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -60,6 +61,9 @@ def get_icon_path():
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        migration_result = migrate_legacy_database_if_needed()
+        print("数据库迁移检查：", migration_result["message"])
 
         database.init_db()
 

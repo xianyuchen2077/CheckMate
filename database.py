@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 
 from pet_system import pet_growth
 from data_guard.integrity_manager import refresh_integrity_record
+from data_guard.paths import get_database_dir, get_database_path
 
 def get_app_dir():
     if getattr(sys, "frozen", False):
@@ -13,12 +14,12 @@ def get_app_dir():
     return Path(__file__).resolve().parent
 
 
-DB_DIR = get_app_dir() / "data"
-DB_PATH = DB_DIR / "checkmate.db"
+DB_DIR = get_database_dir()
+DB_PATH = get_database_path()
 
 
 def get_connection():
-    DB_DIR.mkdir(exist_ok=True)
+    DB_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn

@@ -1,10 +1,14 @@
-import sqlite3
+import sys
 from pathlib import Path
+import sqlite3
 
-# 当前文件在 CheckMate/test/test_tamper_db.py
-# parents[1] 才是 CheckMate 项目根目录
 BASE_DIR = Path(__file__).resolve().parents[1]
-DB_PATH = BASE_DIR / "data" / "checkmate.db"
+sys.path.insert(0, str(BASE_DIR))
+
+from data_guard.paths import get_database_path
+
+
+DB_PATH = get_database_path()
 
 print("数据库路径：", DB_PATH)
 
