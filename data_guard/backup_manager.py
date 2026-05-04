@@ -15,6 +15,7 @@ AUTO_BACKUP_PREFIX = "auto"
 MANUAL_BACKUP_PREFIX = "manual"
 MAX_AUTO_BACKUPS = 10
 SUSPICIOUS_BACKUP_PREFIX = "suspicious"
+RESTORE_BACKUP_PREFIX = "before_restore"
 
 
 def get_timestamp():
@@ -147,3 +148,102 @@ def create_suspicious_backup():
     而是先把当前数据库保存为 suspicious 备份。
     """
     return create_backup(SUSPICIOUS_BACKUP_PREFIX)
+
+def list_backups(prefix=None):
+    """
+    列出备份文件。
+
+    prefix:
+        None：列出所有 .db 备份
+        "auto"：只列出自动备份
+        "manual"：只列出手动备份
+        "suspicious"：只列出可疑备份
+
+    返回：
+        按修改时间从新到旧排序的 Path 列表。
+    """
+    backup_dir = get_backup_dir()
+
+    if not backup_dir.exists():
+        return []
+
+    if prefix is None:
+        backups = list(backup_dir.glob("*_checkmate_*.db"))
+    else:
+        backups = list(backup_dir.glob(f"{prefix}_checkmate_*.db"))
+
+    backups.sort(
+        key=lambda path: path.stat().st_mtime,
+        reverse=True
+    )
+
+    return backups
+
+def get_latest_auto_backup():
+    """
+    获取最近一次自动备份。
+    """
+    backups = list_backups(AUTO_BACKUP_PREFIX)
+
+    if not backups:
+        return None
+
+    return backups[0]
+
+def restore_database_from_backup(backup_path):
+    """
+    从指定备份恢复数据库。
+
+    注意：
+        这个函数只负责复制文件。
+        调用前最好确保程序没有正在写数据库。
+    """
+    ensure_data_guard_dirs()
+
+    backup_path = Path(backup_path)
+    db_path = get_database_path()
+
+    if not backup_path.exists():
+        return {
+            "success": False,
+            "message": "备份文件不存在。",
+            "backup_path": str(backup_path),
+            "database_path": str(db_path),
+        }
+
+    if backup_path.suffix.lower() != ".db":
+        return {
+            "success": False,
+            "message": "备份文件格式不正确。",
+            "backup_path": str(backup_path),
+            "database_path": str(db_path),
+        }
+
+    # 恢复前先备份当前数据库，防止误恢复
+    before_restore_backup = create_backup(RESTORE_BACKUP_PREFIX)
+
+    shutil.copy2(backup_path, db_path)
+
+    return {
+        "success": True,
+        "message": "数据库已从备份恢复。",
+        "backup_path": str(backup_path),
+        "database_path": str(db_path),
+        "before_restore_backup": str(before_restore_backup) if before_restore_backup else None,
+    }
+
+def restore_from_latest_auto_backup():
+    """
+    从最近一次自动备份恢复数据库。
+    """
+    latest_backup = get_latest_auto_backup()
+
+    if latest_backup is None:
+        return {
+            "success": False,
+            "message": "没有找到可用的自动备份。",
+            "backup_path": None,
+            "database_path": str(get_database_path()),
+        }
+
+    return restore_database_from_backup(latest_backup)

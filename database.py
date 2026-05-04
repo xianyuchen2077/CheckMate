@@ -23,6 +23,17 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+def refresh_integrity_after_db_change():
+    """
+    数据库发生正常写入后，刷新完整性记录。
+
+    如果当前数据库处于可疑状态，
+    integrity_manager 会自动跳过刷新。
+    """
+    try:
+        refresh_integrity_record()
+    except Exception as e:
+        print("刷新数据库完整性记录失败：", e)
 
 def init_db():
     conn = get_connection()
@@ -679,15 +690,3 @@ def is_task_active(task_id):
         return False
 
     return row["is_active"] == 1
-
-def refresh_integrity_after_db_change():
-    """
-    数据库发生正常写入后，刷新完整性记录。
-
-    如果当前数据库处于可疑状态，
-    integrity_manager 会自动跳过刷新。
-    """
-    try:
-        refresh_integrity_record()
-    except Exception as e:
-        print("刷新数据库完整性记录失败：", e)

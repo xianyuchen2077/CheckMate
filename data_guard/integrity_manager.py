@@ -166,3 +166,16 @@ def is_integrity_update_locked():
     判断当前是否禁止刷新完整性记录。
     """
     return _INTEGRITY_UPDATE_LOCKED
+
+
+def trust_current_database():
+    """
+    信任当前数据库。
+
+    使用场景：
+        用户确认当前数据库没有问题，
+        或者从备份恢复数据库之后，
+        需要把当前数据库重新登记为可信状态。
+    """
+    unlock_integrity_updates()
+    return save_integrity_info()
