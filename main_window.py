@@ -287,26 +287,43 @@ class MainWindow(QMainWindow):
         for task in tasks:
             title = task["title"]
             remind_time = task["remind_time"]
+            repeat_interval_minutes = task["repeat_interval_minutes"]
             is_done_today = task["is_done_today"]
             is_active = task["is_active"]
             task_id = task["id"]
 
-            if not is_active:
-                status_icon = "⏸️"
-            elif is_done_today:
-                status_icon = "✅"
-            else:
-                status_icon = "⬜"
+            status_icon = self.get_task_icon(
+                is_active=is_active,
+                is_done_today=is_done_today,
+                repeat_interval_minutes=repeat_interval_minutes
+            )
 
-            if remind_time:
-                display_text = f"{status_icon} {title}    ⏰ {remind_time}"
+            if repeat_interval_minutes:
+                repeat_text = self.format_repeat_interval(repeat_interval_minutes)
+
+                if remind_time:
+                    display_text = (
+                        f"{status_icon} {title}    "
+                        f"⏰ {remind_time}    "
+                        f"{repeat_text}"
+                    )
+                else:
+                    display_text = f"{status_icon} {title}    {repeat_text}"
+
             else:
-                display_text = f"{status_icon} {title}"
+                if remind_time:
+                    display_text = f"{status_icon} {title}    ⏰ {remind_time}"
+                else:
+                    display_text = f"{status_icon} {title}"
 
             item = QListWidgetItem(display_text)
             item.setData(1000, task_id)
             item.setData(1001, is_done_today)
             item.setData(1002, is_active)
+
+            # 保存重复提醒间隔，后面完成任务时用它判断是否是周期任务
+            item.setData(1003, repeat_interval_minutes)
+
             item.setForeground(QColor("#111827"))
 
             self.task_list.addItem(item)
@@ -345,10 +362,10 @@ class MainWindow(QMainWindow):
         title = task["title"]
         remind_time = task["remind_time"] or "未设置"
         description = task["description"] or "暂无备注"
-        repeat_interval = task["repeat_interval_minutes"]
+        repeat_interval_minutes = task["repeat_interval_minutes"]
 
-        if repeat_interval:
-            repeat_text = f"每隔 {repeat_interval} 分钟"
+        if repeat_interval_minutes:
+            repeat_text = self.format_repeat_interval(repeat_interval_minutes)
         else:
             repeat_text = "不重复"
 
@@ -433,18 +450,25 @@ class MainWindow(QMainWindow):
     def complete_task(self):
         current_item = self.task_list.currentItem()
 
-        task_id = current_item.data(1000)
-        is_done_today = current_item.data(1001)
-        is_active = current_item.data(1002)
-
         if current_item is None:
             QMessageBox.information(self, "提示", "请先选择一个任务。")
             return
+
+        task_id = current_item.data(1000)
+        is_done_today = current_item.data(1001)
+        is_active = current_item.data(1002)
+        repeat_interval_minutes = current_item.data(1003)
 
         if not is_active:
             QMessageBox.information(self, "提示", "这个任务已暂停，不能打卡。")
             return
 
+        # 周期性任务：不调用 database.mark_task_done_today()
+        if self.is_repeat_task(repeat_interval_minutes):
+            self.complete_repeat_task(task_id)
+            return
+
+        # 普通任务：沿用每日打卡逻辑
         if is_done_today:
             QMessageBox.information(self, "提示", "这个任务今天已经完成打卡了。")
             return
@@ -471,6 +495,58 @@ class MainWindow(QMainWindow):
 
         if growth_result is not None:
             self.show_pet_growth_dialog(growth_result)
+
+    def complete_repeat_task(self, task_id):
+        """
+        完成一次周期性任务。
+
+        注意：
+            周期性任务不调用 database.mark_task_done_today(task_id)
+            因为它不是“今天完成一次就结束”的任务。
+            它只是表示“本轮提醒已完成”，后续仍然会继续重复提醒。
+        """
+        task = database.get_task_by_id(task_id)
+
+        if task is None:
+            QMessageBox.warning(self, "错误", "没有找到这个任务，可能已经被删除。")
+            self.load_tasks()
+            return
+
+        title = task["title"]
+        remind_time = task["remind_time"]
+        repeat_interval_minutes = task["repeat_interval_minutes"]
+
+        growth_result = pet_growth.add_exp_for_completed_task(task)
+
+        if growth_result is not None:
+            self.tip_label.setText(growth_result["message"])
+        else:
+            self.tip_label.setText(f"本次周期任务已完成：{title}")
+
+        self.load_tasks()
+
+        if hasattr(self, "pet_window"):
+            self.pet_window.refresh_growth_info()
+            self.pet_window.set_done()
+
+        if hasattr(self, "tray_manager") and self.tray_manager is not None:
+            self.tray_manager.show_message(
+                "CheckMate",
+                f"本次已完成：{title}",
+                3000
+            )
+
+        if growth_result is not None:
+            self.show_pet_growth_dialog(growth_result)
+
+        # 如果提醒管理器已经启动，则继续安排下一次周期提醒
+        if hasattr(self, "reminder_manager") and self.reminder_manager is not None:
+            self.reminder_manager.schedule_repeat_if_needed(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes
+            )
 
     def toggle_task_active(self):
         current_item = self.task_list.currentItem()
@@ -535,3 +611,50 @@ class MainWindow(QMainWindow):
 
         dialog = PetGrowthDialog(growth_result, self)
         dialog.exec()
+
+    def is_repeat_task(self, repeat_interval_minutes):
+        """
+        判断是否为周期性重复提醒任务。
+        """
+        return repeat_interval_minutes is not None and repeat_interval_minutes > 0
+
+
+    def get_task_icon(self, is_active, is_done_today, repeat_interval_minutes):
+        """
+        根据任务状态返回任务列表图标。
+
+        图标规则：
+            ⏸️  已暂停任务
+            🔁  周期性重复提醒任务
+            ✅  普通任务今日已完成
+            ⬜  普通任务今日未完成
+        """
+        if not is_active:
+            return "⏸️"
+
+        if self.is_repeat_task(repeat_interval_minutes):
+            return "🔁"
+
+        if is_done_today:
+            return "✅"
+
+        return "⬜"
+
+
+    def format_repeat_interval(self, repeat_interval_minutes):
+        """
+        把重复提醒间隔格式化成显示文字。
+        """
+        if repeat_interval_minutes is None:
+            return ""
+
+        if repeat_interval_minutes < 60:
+            return f"每隔 {repeat_interval_minutes} 分钟"
+
+        hours = repeat_interval_minutes // 60
+        minutes = repeat_interval_minutes % 60
+
+        if minutes == 0:
+            return f"每隔 {hours} 小时"
+
+        return f"每隔 {hours} 小时 {minutes} 分钟"

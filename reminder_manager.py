@@ -77,7 +77,12 @@ class ReminderManager:
         action_result = dialog.get_action_result()
 
         if action_result == ReminderDialog.RESULT_DONE:
-            self.handle_done(task_id, title)
+            self.handle_done(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes
+            )
             return
 
         if action_result == ReminderDialog.RESULT_LATER:
@@ -117,10 +122,57 @@ class ReminderManager:
                 5000
             )
 
-    def handle_done(self, task_id, title):
+    def handle_done(self, task_id, title, remind_time=None, repeat_interval_minutes=None):
         """
         处理“完成打卡”。
+
+        普通任务：
+            今天只完成一次，完成后不再提醒。
+
+        重复提醒任务：
+            每次点击完成都算完成本次。
+            之后继续按 repeat_interval_minutes 安排下一次提醒。
         """
+        is_repeat_task = repeat_interval_minutes is not None
+
+        if is_repeat_task:
+            task = database.get_task_by_id(task_id)
+
+            growth_result = None
+            if task is not None:
+                growth_result = pet_growth.add_exp_for_completed_task(task)
+
+            self.main_window.tip_label.setText(f"本次已完成：{title}")
+
+            if growth_result is not None:
+                self.main_window.tip_label.setText(growth_result["message"])
+
+            self.main_window.load_tasks()
+
+            if self.pet_window is not None:
+                self.pet_window.refresh_growth_info()
+                self.pet_window.set_done()
+
+            if self.tray_manager is not None:
+                self.tray_manager.show_message(
+                    "CheckMate",
+                    f"本次已完成，稍后还会继续提醒：{title}",
+                    3000
+                )
+
+            if growth_result is not None:
+                self.show_pet_growth_dialog(growth_result)
+
+            self.schedule_repeat_if_needed(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes
+            )
+
+            return
+
+        # 普通任务：沿用原来的每日打卡逻辑
         is_new_checkin = database.mark_task_done_today(task_id)
 
         if not is_new_checkin:
@@ -245,7 +297,15 @@ class ReminderManager:
         repeat_interval_minutes
     ):
         """
-        如果任务设置了重复提醒，并且今天还没完成，就安排下一次提醒。
+        安排下一次重复提醒。
+
+        重复任务即使点击了“完成打卡”，也会继续安排下一次。
+
+        停止条件：
+            1. 今天不再提醒
+            2. 任务被暂停
+            3. repeat_interval_minutes 为空
+            4. 当前任务已经有一个重复提醒定时器在等待
         """
         if repeat_interval_minutes is None:
             return
@@ -264,14 +324,12 @@ class ReminderManager:
         if skip_today_key in self.skip_today_keys:
             return
 
-        if database.is_task_done_today(task_id):
-            return
-
         if not database.is_task_active(task_id):
             return
 
         repeat_timer_key = f"{today}-{task_id}"
 
+        # 防止同一个周期任务被重复安排多个定时器
         if repeat_timer_key in self.repeat_timer_keys:
             return
 
@@ -282,7 +340,7 @@ class ReminderManager:
         if self.tray_manager is not None:
             self.tray_manager.show_message(
                 "CheckMate",
-                f"如果还没完成，{repeat_interval_minutes} 分钟后会再次提醒：{title}",
+                f"{repeat_interval_minutes} 分钟后会再次提醒：{title}",
                 3000
             )
 
@@ -306,18 +364,15 @@ class ReminderManager:
         repeat_timer_key
     ):
         """
-        重复提醒定时器触发。
-        触发前再次检查任务是否还需要提醒。
+        重复提醒时间到。
         """
+        # 定时器已经触发，释放 key，允许下一轮重新安排
         self.repeat_timer_keys.discard(repeat_timer_key)
 
         today = database.get_today_string()
         skip_today_key = f"{today}-{task_id}"
 
         if skip_today_key in self.skip_today_keys:
-            return
-
-        if database.is_task_done_today(task_id):
             return
 
         if not database.is_task_active(task_id):
