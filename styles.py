@@ -244,3 +244,70 @@ def get_add_task_dialog_style(background_path=None):
             min-height: 30px;
         }}
     """
+
+def get_repeat_reminder_widget_style():
+    """
+    获取重复提醒组件样式。
+
+    文字颜色修改：
+        重复提醒勾选框文字：#repeatCheckBox 的 color
+        下拉框文字：#repeatComboBox 的 color
+        自定义输入框文字：#repeatCustomInput 的 color
+        时钟图标颜色：#repeatClockLabel 的 color
+    """
+    return """
+        #repeatCheckBox {
+            color: #ffffff;
+            background-color: transparent;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        #repeatComboBox {
+            background-color: #ffffff;
+            color: #111827;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 6px 8px;
+            font-size: 13px;
+        }
+
+        #repeatComboBox:disabled {
+            background-color: #e5e7eb;
+            color: #6b7280;
+            border: 1px solid #d1d5db;
+        }
+
+        #repeatComboBox QAbstractItemView {
+            background-color: #ffffff;
+            color: #111827;
+            selection-background-color: #dbeafe;
+            selection-color: #111827;
+            border: 1px solid #d1d5db;
+        }
+
+        #repeatCustomInput {
+            background-color: #ffffff;
+            color: #111827;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 6px 8px;
+            font-size: 13px;
+        }
+
+        #repeatCustomInput:disabled {
+            background-color: #e5e7eb;
+            color: #6b7280;
+            border: 1px solid #d1d5db;
+        }
+
+        #repeatClockLabel {
+            background-color: rgba(17, 24, 39, 160);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 150);
+            border-left: none;
+            border-top-right-radius: 8px;
+            border-bottom-right-radius: 8px;
+            font-size: 15px;
+        }
+    """
