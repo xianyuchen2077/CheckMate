@@ -14,6 +14,7 @@ class ReminderManager:
         self.pet_window = pet_window
         self.reminded_keys = set()
         self.skip_today_keys = set()
+        self.repeat_timer_keys = set()
 
         self.timer = QTimer(self.main_window)
         self.timer.timeout.connect(self.check_reminders)
@@ -36,6 +37,7 @@ class ReminderManager:
             task_id = task["id"]
             title = task["title"]
             remind_time = task["remind_time"]
+            repeat_interval_minutes = task["repeat_interval_minutes"]
 
             today = database.get_today_string()
             skip_today_key = f"{today}-{task_id}"
@@ -49,17 +51,18 @@ class ReminderManager:
                 continue
 
             self.reminded_keys.add(remind_key)
-            self.show_reminder(task_id, title, remind_time)
+            self.show_reminder(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes
+            )
 
-    def show_reminder(self, task_id, title, remind_time):
+    def show_reminder(self, task_id, title, remind_time, repeat_interval_minutes=None):
         """
         显示提醒。
-
-        ReminderManager 只负责业务流程：
-        - 更新宠物状态
-        - 发送托盘通知
-        - 调用 ReminderDialog 显示弹窗
-        - 根据用户选择执行后续动作
+        如果任务设置了重复提醒，且用户没有完成任务、没有选择稍后提醒，
+        则在弹窗关闭后安排下一次重复提醒。
         """
         self.notify_pet_reminding(title)
         self.notify_tray_reminding(title, remind_time)
@@ -75,16 +78,26 @@ class ReminderManager:
 
         if action_result == ReminderDialog.RESULT_DONE:
             self.handle_done(task_id, title)
+            return
 
-        elif action_result == ReminderDialog.RESULT_LATER:
-            self.choose_snooze_option(task_id, title, remind_time)
+        if action_result == ReminderDialog.RESULT_LATER:
+            self.choose_snooze_option(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes
+            )
+            return
 
-        elif action_result == ReminderDialog.RESULT_OPEN:
+        if action_result == ReminderDialog.RESULT_OPEN:
             self.main_window.show_main_window()
 
-        else:
-            # 用户关闭弹窗，暂时不做处理
-            pass
+        self.schedule_repeat_if_needed(
+            task_id,
+            title,
+            remind_time,
+            repeat_interval_minutes
+        )
 
     def notify_pet_reminding(self, title):
         """
@@ -149,7 +162,13 @@ class ReminderManager:
         dialog = PetGrowthDialog(growth_result, self.main_window)
         dialog.exec()
 
-    def choose_snooze_option(self, task_id, title, remind_time):
+    def choose_snooze_option(
+        self,
+        task_id,
+        title,
+        remind_time,
+        repeat_interval_minutes=None
+    ):
         """
         打开稍后提醒选项弹窗。
         """
@@ -167,7 +186,13 @@ class ReminderManager:
             if snooze_until is None:
                 return
 
-            self.schedule_snooze(task_id, title, remind_time, snooze_until)
+            self.schedule_snooze(
+                task_id,
+                title,
+                remind_time,
+                snooze_until,
+                repeat_interval_minutes
+            )
 
         elif action_result == SnoozeDialog.RESULT_TODAY_SKIP:
             self.skip_task_today(task_id, title)
@@ -176,7 +201,14 @@ class ReminderManager:
             # 用户关闭稍后弹窗，不做处理
             pass
 
-    def schedule_snooze(self, task_id, title, remind_time, snooze_until):
+    def schedule_snooze(
+        self,
+        task_id,
+        title,
+        remind_time,
+        snooze_until,
+        repeat_interval_minutes=None
+    ):
         """
         安排下一次稍后提醒。
         """
@@ -197,7 +229,105 @@ class ReminderManager:
 
         QTimer.singleShot(
             delay_ms,
-            lambda: self.show_reminder(task_id, title, remind_time)
+            lambda: self.show_reminder(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes
+            )
+        )
+
+    def schedule_repeat_if_needed(
+        self,
+        task_id,
+        title,
+        remind_time,
+        repeat_interval_minutes
+    ):
+        """
+        如果任务设置了重复提醒，并且今天还没完成，就安排下一次提醒。
+        """
+        if repeat_interval_minutes is None:
+            return
+
+        try:
+            repeat_interval_minutes = int(repeat_interval_minutes)
+        except (TypeError, ValueError):
+            return
+
+        if repeat_interval_minutes <= 0:
+            return
+
+        today = database.get_today_string()
+        skip_today_key = f"{today}-{task_id}"
+
+        if skip_today_key in self.skip_today_keys:
+            return
+
+        if database.is_task_done_today(task_id):
+            return
+
+        if not database.is_task_active(task_id):
+            return
+
+        repeat_timer_key = f"{today}-{task_id}"
+
+        if repeat_timer_key in self.repeat_timer_keys:
+            return
+
+        self.repeat_timer_keys.add(repeat_timer_key)
+
+        delay_ms = repeat_interval_minutes * 60 * 1000
+
+        if self.tray_manager is not None:
+            self.tray_manager.show_message(
+                "CheckMate",
+                f"如果还没完成，{repeat_interval_minutes} 分钟后会再次提醒：{title}",
+                3000
+            )
+
+        QTimer.singleShot(
+            delay_ms,
+            lambda: self.handle_repeat_timeout(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes,
+                repeat_timer_key
+            )
+        )
+
+    def handle_repeat_timeout(
+        self,
+        task_id,
+        title,
+        remind_time,
+        repeat_interval_minutes,
+        repeat_timer_key
+    ):
+        """
+        重复提醒定时器触发。
+        触发前再次检查任务是否还需要提醒。
+        """
+        self.repeat_timer_keys.discard(repeat_timer_key)
+
+        today = database.get_today_string()
+        skip_today_key = f"{today}-{task_id}"
+
+        if skip_today_key in self.skip_today_keys:
+            return
+
+        if database.is_task_done_today(task_id):
+            return
+
+        if not database.is_task_active(task_id):
+            return
+
+        self.show_reminder(
+            task_id,
+            title,
+            remind_time,
+            repeat_interval_minutes
         )
 
     def skip_task_today(self, task_id, title):

@@ -61,6 +61,12 @@ def init_db():
             ADD COLUMN description TEXT
         """)
 
+    if "repeat_interval_minutes" not in columns:
+        cursor.execute("""
+            ALTER TABLE tasks
+            ADD COLUMN repeat_interval_minutes INTEGER
+        """)
+
     # 打卡记录表：保存每天的完成记录
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS checkins (
@@ -141,6 +147,7 @@ def get_all_tasks_with_today_status():
             tasks.id,
             tasks.title,
             tasks.remind_time,
+            tasks.repeat_interval_minutes,
             tasks.is_active,
             tasks.created_at,
             CASE
@@ -159,14 +166,24 @@ def get_all_tasks_with_today_status():
 
     return tasks
 
-def add_task(title, remind_time=None, description=None):
+def add_task(title, remind_time=None, description=None, repeat_interval_minutes=None):
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
-        INSERT INTO tasks (title, remind_time, description)
-        VALUES (?, ?, ?)
-    """, (title, remind_time, description))
+        INSERT INTO tasks (
+            title,
+            remind_time,
+            description,
+            repeat_interval_minutes
+        )
+        VALUES (?, ?, ?, ?)
+    """, (
+        title,
+        remind_time,
+        description,
+        repeat_interval_minutes
+    ))
 
     conn.commit()
     conn.close()
@@ -176,7 +193,14 @@ def get_task_by_id(task_id):
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT id, title, remind_time, description, created_at, is_active
+        SELECT
+            id,
+            title,
+            remind_time,
+            description,
+            repeat_interval_minutes,
+            created_at,
+            is_active
         FROM tasks
         WHERE id = ?
     """, (task_id,))
@@ -186,15 +210,30 @@ def get_task_by_id(task_id):
 
     return task
 
-def update_task(task_id, title, remind_time, description=None):
+def update_task(
+    task_id,
+    title,
+    remind_time,
+    description=None,
+    repeat_interval_minutes=None
+):
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
         UPDATE tasks
-        SET title = ?, remind_time = ?, description = ?
+        SET title = ?,
+            remind_time = ?,
+            description = ?,
+            repeat_interval_minutes = ?
         WHERE id = ?
-    """, (title, remind_time, description, task_id))
+    """, (
+        title,
+        remind_time,
+        description,
+        repeat_interval_minutes,
+        task_id
+    ))
 
     conn.commit()
     conn.close()
@@ -349,7 +388,8 @@ def get_due_tasks_now():
         SELECT
             tasks.id,
             tasks.title,
-            tasks.remind_time
+            tasks.remind_time,
+            tasks.repeat_interval_minutes
         FROM tasks
         LEFT JOIN checkins
             ON tasks.id = checkins.task_id
@@ -574,3 +614,46 @@ def save_pet_status(
 
     conn.commit()
     conn.close()
+
+def is_task_done_today(task_id):
+    """
+    判断任务今天是否已经完成。
+    """
+    today = get_today_string()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id
+        FROM checkins
+        WHERE task_id = ?
+          AND checkin_date = ?
+    """, (task_id, today))
+
+    row = cursor.fetchone()
+    conn.close()
+
+    return row is not None
+
+
+def is_task_active(task_id):
+    """
+    判断任务是否仍然启用。
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT is_active
+        FROM tasks
+        WHERE id = ?
+    """, (task_id,))
+
+    row = cursor.fetchone()
+    conn.close()
+
+    if row is None:
+        return False
+
+    return row["is_active"] == 1

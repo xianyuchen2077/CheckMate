@@ -62,7 +62,7 @@ class MainWindow(QMainWindow):
         database.init_db()
 
         self.setWindowTitle("CheckMate - 不要成为咸鱼")
-        self.resize(900, 600)
+        self.resize(1050, 700)
 
         self.force_quit = False
 
@@ -345,12 +345,18 @@ class MainWindow(QMainWindow):
         title = task["title"]
         remind_time = task["remind_time"] or "未设置"
         description = task["description"] or "暂无备注"
+        repeat_interval = task["repeat_interval_minutes"]
+
+        if repeat_interval:
+            repeat_text = f"每隔 {repeat_interval} 分钟"
+        else:
+            repeat_text = "不重复"
 
         active_text = "启用中" if is_active else "已暂停"
         today_text = "已完成" if is_done_today else "未完成"
 
         self.detail_name.setText(f"任务名称：{title}")
-        self.detail_time.setText(f"提醒时间：{remind_time}")
+        self.detail_time.setText(f"提醒时间：{remind_time} / 重复：{repeat_text}")
         self.detail_active.setText(f"任务状态：{active_text}")
         self.detail_today.setText(f"今日状态：{today_text}")
         self.detail_description.setText(f"备注说明：{description}")
@@ -359,13 +365,18 @@ class MainWindow(QMainWindow):
         dialog = AddTaskDialog(self)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            title, remind_time, description = dialog.get_data()
+            title, remind_time, description, repeat_interval_minutes = dialog.get_data()
 
             if not title:
                 QMessageBox.information(self, "提示", "任务名称不能为空。")
                 return
 
-            database.add_task(title, remind_time, description)
+            database.add_task(
+                title,
+                remind_time,
+                description,
+                repeat_interval_minutes
+            )
 
             if remind_time:
                 self.tip_label.setText(f"新任务已添加：{title}，提醒时间：{remind_time}")
@@ -393,17 +404,24 @@ class MainWindow(QMainWindow):
             self,
             title=task["title"],
             remind_time=task["remind_time"],
-            description=task["description"]
+            description=task["description"],
+            repeat_interval_minutes=task["repeat_interval_minutes"]
         )
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            title, remind_time, description = dialog.get_data()
+            title, remind_time, description, repeat_interval_minutes = dialog.get_data()
 
             if not title:
                 QMessageBox.information(self, "提示", "任务名称不能为空。")
                 return
 
-            database.update_task(task_id, title, remind_time, description)
+            database.update_task(
+                task_id,
+                title,
+                remind_time,
+                description,
+                repeat_interval_minutes
+            )
 
             if remind_time:
                 self.tip_label.setText(f"任务已更新：{title}，提醒时间：{remind_time}")
