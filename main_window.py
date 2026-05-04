@@ -440,6 +440,14 @@ class MainWindow(QMainWindow):
                 repeat_interval_minutes
             )
 
+            self.after_task_saved(
+                task_id=task_id,
+                title=title,
+                remind_time=remind_time,
+                repeat_interval_minutes=repeat_interval_minutes,
+                is_edit=True
+            )
+
             if remind_time:
                 self.tip_label.setText(f"任务已更新：{title}，提醒时间：{remind_time}")
             else:
@@ -583,6 +591,39 @@ class MainWindow(QMainWindow):
             database.delete_task(task_id)
             self.tip_label.setText(f"已删除任务：{item_text}")
             self.load_tasks()
+
+    def after_task_saved(
+        self,
+        task_id,
+        title,
+        remind_time,
+        repeat_interval_minutes,
+        is_edit=False
+    ):
+        """
+        添加 / 编辑任务保存后，处理提醒管理器同步。
+
+        重点：
+            如果任务被设置为重复提醒，不应该只等每天 remind_time 那一分钟。
+            编辑后应该主动安排下一轮重复提醒。
+        """
+        if not remind_time:
+            return
+
+        if not self.is_repeat_task(repeat_interval_minutes):
+            return
+
+        if not hasattr(self, "reminder_manager") or self.reminder_manager is None:
+            return
+
+        self.reminder_manager.reset_repeat_timer_for_task(task_id)
+
+        self.reminder_manager.schedule_repeat_if_needed(
+            task_id,
+            title,
+            remind_time,
+            repeat_interval_minutes
+        )
 
     def update_stats(self):
         total, done = database.get_today_stats()

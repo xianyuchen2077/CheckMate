@@ -374,9 +374,13 @@ def get_streak_days():
 
 def get_due_tasks_now():
     """
-    获取当前时间需要提醒、且今天还没完成的任务。
-    没有设置提醒时间的任务不会触发提醒。
-    暂停任务不会触发提醒。
+    获取当前时间需要提醒的任务。
+
+    普通任务：
+        今天未完成，才提醒。
+
+    重复提醒任务：
+        不受今日 checkins 影响，只要到提醒时间就可以提醒。
     """
     now_time = datetime.now().strftime("%H:%M")
     today = get_today_string()
@@ -398,7 +402,10 @@ def get_due_tasks_now():
           AND tasks.remind_time IS NOT NULL
           AND tasks.remind_time != ''
           AND tasks.remind_time = ?
-          AND checkins.id IS NULL
+          AND (
+                tasks.repeat_interval_minutes IS NOT NULL
+                OR checkins.id IS NULL
+          )
     """, (today, now_time))
 
     tasks = cursor.fetchall()

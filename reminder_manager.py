@@ -203,6 +203,23 @@ class ReminderManager:
         if growth_result is not None:
             self.show_pet_growth_dialog(growth_result)
 
+    def reset_repeat_timer_for_task(self, task_id):
+        """
+        编辑任务后清理该任务今天的提醒状态。
+
+        作用：
+            1. 允许编辑后的任务重新进入提醒逻辑
+            2. 清理 repeat_timer_keys，避免旧状态挡住新状态
+        """
+        today = database.get_today_string()
+
+        self.reminded_keys = {
+            key for key in self.reminded_keys
+            if not key.startswith(f"{today}-{task_id}-")
+        }
+
+        self.repeat_timer_keys.discard(f"{today}-{task_id}")
+
     def show_pet_growth_dialog(self, growth_result):
         """
         提醒弹窗完成任务后，显示宠物升级 / 进化提示。
@@ -250,8 +267,14 @@ class ReminderManager:
             self.skip_task_today(task_id, title)
 
         else:
-            # 用户关闭稍后弹窗，不做处理
-            pass
+            # 用户关闭稍后弹窗：
+            # 如果是重复提醒任务，继续按重复间隔安排下一轮，避免链路断掉。
+            self.schedule_repeat_if_needed(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes
+            )
 
     def schedule_snooze(
         self,
@@ -366,7 +389,6 @@ class ReminderManager:
         """
         重复提醒时间到。
         """
-        # 定时器已经触发，释放 key，允许下一轮重新安排
         self.repeat_timer_keys.discard(repeat_timer_key)
 
         today = database.get_today_string()
@@ -378,11 +400,22 @@ class ReminderManager:
         if not database.is_task_active(task_id):
             return
 
+        task = database.get_task_by_id(task_id)
+        if task is None:
+            return
+
+        latest_title = task["title"]
+        latest_remind_time = task["remind_time"]
+        latest_repeat_interval_minutes = task["repeat_interval_minutes"]
+
+        if latest_repeat_interval_minutes is None:
+            return
+
         self.show_reminder(
             task_id,
-            title,
-            remind_time,
-            repeat_interval_minutes
+            latest_title,
+            latest_remind_time,
+            latest_repeat_interval_minutes
         )
 
     def skip_task_today(self, task_id, title):
