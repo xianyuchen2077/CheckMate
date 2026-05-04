@@ -1,7 +1,8 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtGui import QColor, QFont, QIcon
+from PySide6.QtGui import QColor, QFont, QIcon, QDesktopServices
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -27,6 +28,11 @@ from tray_manager import TrayManager
 from pet_window import PetWindow
 from pet_system import pet_growth
 from pet_growth_dialog import PetGrowthDialog
+from data_guard.backup_manager import (
+    create_auto_backup,
+    create_manual_backup,
+    get_backup_folder_path,
+)
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -60,6 +66,13 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         database.init_db()
+
+        # 启动时自动备份数据库
+        create_auto_backup()
+
+        # Debug: 输出备份文件夹路径和最新自动备份信息，验证备份功能是否正常
+        backup_path = create_auto_backup()
+        print("自动备份结果：", backup_path)
 
         self.setWindowTitle("CheckMate - 不要成为咸鱼")
         self.resize(1050, 700)
