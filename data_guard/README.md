@@ -1,6 +1,6 @@
 # data_guard
 
-`data_guard` 是 CheckMate 的数据安全模块，主要用于保护本地数据库，降低数据丢失和被外部篡改的风险。
+`data_guard` 是 CheckMate 的数据安全模块，用于保护本地数据库，降低数据丢失和被外部篡改的风险。
 
 当前模块的目标不是实现绝对安全，而是做到：
 
@@ -8,6 +8,7 @@
 - 数据库被外部修改后能够被检测出来
 - 检测到异常时不会把可疑数据库误认为正常数据库
 - 出问题后可以从备份中恢复数据
+- 程序更新或替换 release 文件夹时，用户数据不会被一起删除
 
 ---
 
@@ -19,22 +20,90 @@ data_guard/
 ├── paths.py
 ├── backup_manager.py
 ├── integrity_manager.py
+├── migration_manager.py
 ├── startup_guard.py
 └── README.md
 ```
 
-项目运行后会生成：
+---
+
+## 当前数据存储位置
+
+CheckMate 的正式用户数据不再保存在项目目录下，而是保存在 Windows 当前用户的本地应用数据目录中。
+
+Windows 默认路径：
 
 ```text
-data/
-└── checkmate.db
-
-data_backups/
-├── auto_checkmate_xxx.db
-├── suspicious_checkmate_xxx.db
-├── before_restore_checkmate_xxx.db
-└── integrity.json
+%LOCALAPPDATA%\CheckMate\
 ```
+
+实际示例：
+
+```text
+C:\Users\用户名\AppData\Local\CheckMate\
+```
+
+当前数据目录结构：
+
+```text
+%LOCALAPPDATA%\CheckMate\
+├── data/
+│   └── checkmate.db
+└── data_backups/
+    ├── auto_checkmate_xxx.db
+    ├── suspicious_checkmate_xxx.db
+    ├── before_restore_checkmate_xxx.db
+    ├── integrity.json
+    └── migration_done.txt
+```
+
+其中：
+
+| 文件 / 目录                       | 说明                                       |
+| --------------------------------- | ------------------------------------------ |
+| `data/checkmate.db`               | CheckMate 的主数据库                       |
+| `data_backups/`                   | 数据库备份与完整性记录目录                 |
+| `auto_checkmate_xxx.db`           | 正常启动时生成的自动备份                   |
+| `suspicious_checkmate_xxx.db`     | 检测到数据库疑似被外部修改时生成的可疑备份 |
+| `before_restore_checkmate_xxx.db` | 从备份恢复前，对当前数据库做的保护性备份   |
+| `integrity.json`                  | 数据库完整性校验记录                       |
+| `migration_done.txt`              | 数据迁移检查记录                           |
+
+---
+
+## 为什么要迁移到 AppData
+
+旧版本数据库位于项目目录：
+
+```text
+CheckMate/data/checkmate.db
+```
+
+这种方式在开发阶段方便，但正式发布后有风险：
+
+```text
+用户删除 release 文件夹
+↓
+data/checkmate.db 也被一起删除
+↓
+任务、打卡记录、宠物进度全部丢失
+```
+
+迁移到 AppData 后，程序文件和用户数据分离：
+
+```text
+release/CheckMate/
+├── CheckMate.exe
+├── _internal/
+└── assets/
+
+%LOCALAPPDATA%/CheckMate/
+├── data/
+│   └── checkmate.db
+└── data_backups/
+```
+
+这样即使用户更新、删除或替换程序目录，用户数据仍然保留。
 
 ---
 
@@ -46,22 +115,69 @@ data_backups/
 
 主要负责：
 
+- 获取程序目录
+- 获取用户数据目录
 - 获取数据库路径
 - 获取备份目录
 - 获取完整性校验文件路径
+- 获取旧版本数据库路径
 - 创建必要的数据目录
 
-当前数据库路径：
+当前正式数据库路径：
 
 ```text
-data/checkmate.db
+%LOCALAPPDATA%\CheckMate\data\checkmate.db
 ```
 
 当前备份目录：
 
 ```text
-data_backups/
+%LOCALAPPDATA%\CheckMate\data_backups\
 ```
+
+后续如果需要修改数据存储位置，应优先修改 `paths.py`。
+
+---
+
+### `migration_manager.py`
+
+负责旧数据库迁移。
+
+旧版本数据库路径：
+
+```text
+CheckMate/data/checkmate.db
+```
+
+新版本数据库路径：
+
+```text
+%LOCALAPPDATA%\CheckMate\data\checkmate.db
+```
+
+迁移策略：
+
+```text
+如果新数据库已经存在：
+    不覆盖新数据库
+
+如果新数据库不存在，但旧数据库存在：
+    复制旧数据库到 AppData 用户数据目录
+
+如果旧备份目录存在：
+    复制旧备份文件到新的 data_backups 目录
+
+旧 integrity.json 不直接迁移：
+    因为数据库路径已经变化，启动后会重新生成完整性记录
+```
+
+迁移完成后，会生成：
+
+```text
+%LOCALAPPDATA%\CheckMate\data_backups\migration_done.txt
+```
+
+这个文件用于记录迁移检查结果，方便排查问题。
 
 ---
 
@@ -73,7 +189,10 @@ data_backups/
 
 - 启动时自动备份数据库
 - 创建可疑数据库备份
-- 恢复前自动保护当前数据库
+- 创建恢复前保护性备份
+- 列出备份文件
+- 获取最近一次自动备份
+- 从指定备份恢复数据库
 - 从最近一次自动备份恢复数据库
 - 清理旧的自动备份
 
@@ -106,6 +225,17 @@ data_backups/
 
 如果检测到异常，会锁定完整性记录更新，避免把可疑数据库重新登记为正常数据库。
 
+`integrity.json` 示例：
+
+```json
+{
+    "database_path": "C:\\Users\\用户名\\AppData\\Local\\CheckMate\\data\\checkmate.db",
+    "sha256": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "updated_at": "2026-05-04 20:04:54",
+    "version": 1
+}
+```
+
 ---
 
 ### `startup_guard.py`
@@ -121,6 +251,7 @@ run_startup_data_guard()
 推荐在 `main_window.py` 中这样使用：
 
 ```python
+migration_result = migrate_legacy_database_if_needed()
 database.init_db()
 self.data_guard_result = run_startup_data_guard()
 ```
@@ -155,7 +286,7 @@ self.data_guard_result = run_startup_data_guard()
 备份文件示例：
 
 ```text
-data_backups/auto_checkmate_20260504_200454.db
+%LOCALAPPDATA%\CheckMate\data_backups\auto_checkmate_20260504_200454.db
 ```
 
 如果 `checkmate.db` 被误删、损坏或覆盖，可以从自动备份中恢复。
@@ -168,6 +299,10 @@ data_backups/auto_checkmate_20260504_200454.db
 
 如果数据库被外部工具修改，下次启动时会检测到 hash 不一致，并提示数据库可能被修改或损坏。
 
+注意：
+
+当前机制不是阻止别人修改数据库，而是发现数据库被改过。
+
 ---
 
 ### 3. 可疑数据库隔离
@@ -175,7 +310,7 @@ data_backups/auto_checkmate_20260504_200454.db
 检测到异常时，会生成：
 
 ```text
-data_backups/suspicious_checkmate_xxx.db
+%LOCALAPPDATA%\CheckMate\data_backups\suspicious_checkmate_xxx.db
 ```
 
 这份文件用于保留现场，方便之后排查或恢复。
@@ -189,50 +324,114 @@ data_backups/suspicious_checkmate_xxx.db
 从备份恢复数据库前，会先把当前数据库备份为：
 
 ```text
-data_backups/before_restore_checkmate_xxx.db
+%LOCALAPPDATA%\CheckMate\data_backups\before_restore_checkmate_xxx.db
 ```
 
 这样即使恢复错了，也还有机会找回恢复前的数据。
 
 ---
 
-## 常用流程
+## 正常启动流程
 
-### 正常启动
+推荐启动顺序：
 
 ```text
+迁移旧数据库
+↓
+初始化数据库
+↓
+运行数据安全检查
+↓
+初始化主窗口 UI
+↓
+加载任务
+↓
+启动托盘、宠物和提醒管理器
+```
+
+对应代码示例：
+
+```python
+migration_result = migrate_legacy_database_if_needed()
+print("数据库迁移检查：", migration_result["message"])
+
 database.init_db()
-↓
-run_startup_data_guard()
-↓
-检查完整性
-↓
-自动备份
-↓
-刷新 integrity.json
+
+self.data_guard_result = run_startup_data_guard()
 ```
 
 ---
 
-### 检测到篡改
+## 数据迁移流程
+
+```text
+程序启动
+↓
+检查 AppData 中是否已有正式数据库
+↓
+如果正式数据库已存在：
+    不覆盖，直接使用正式数据库
+
+如果正式数据库不存在：
+    检查项目目录下是否存在旧数据库
+
+如果旧数据库存在：
+    复制旧数据库到 AppData
+
+如果旧数据库不存在：
+    创建新的空数据库
+```
+
+迁移过程不会删除旧数据库。
+
+旧目录可以暂时保留：
+
+```text
+CheckMate/data/
+CheckMate/data_backups/
+```
+
+确认新版本稳定后，可以再手动清理旧目录。
+
+---
+
+## 检测到篡改时的流程
 
 ```text
 启动程序
 ↓
 发现 checkmate.db hash 不一致
 ↓
-打印警告
+打印完整性警告
 ↓
-生成 suspicious 备份
+生成 suspicious 可疑备份
 ↓
 锁定完整性记录
+↓
+不创建普通 auto 备份
 ↓
 不刷新 integrity.json
 ```
 
+这样做是为了避免：
+
+```text
+数据库被外部篡改
+↓
+程序发现异常
+↓
+又把篡改后的数据库 hash 写入 integrity.json
+↓
+下次启动不再报警
+```
+
+也就是防止可疑数据库被“洗白”。
+
 ---
 
-### 从最近自动备份恢复
+## 从最近自动备份恢复
+
+可以通过底层函数从最近一次自动备份恢复数据库。
 
 ```python
 from data_guard.backup_manager import restore_from_latest_auto_backup
@@ -260,6 +459,36 @@ if result["success"]:
 
 ---
 
+## 正常数据库写入后的完整性刷新
+
+程序内部正常修改数据库后，需要刷新完整性记录。
+
+例如：
+
+- 添加任务
+- 编辑任务
+- 删除任务
+- 完成打卡
+- 暂停 / 启用任务
+- 更新宠物状态
+- 保存宠物状态
+
+推荐在 `database.py` 中统一封装：
+
+```python
+def refresh_integrity_after_db_change():
+    try:
+        refresh_integrity_record()
+    except Exception as e:
+        print("刷新数据库完整性记录失败：", e)
+```
+
+然后在数据库写入函数 `commit()` 和 `close()` 后调用。
+
+如果当前数据库已经被判定为可疑状态，`refresh_integrity_record()` 会因为锁定机制而跳过刷新。
+
+---
+
 ## 测试脚本
 
 建议保留以下测试脚本：
@@ -269,6 +498,8 @@ test/
 ├── test_tamper_db.py
 └── test_restore_latest_backup.py
 ```
+
+---
 
 ### `test_tamper_db.py`
 
@@ -283,6 +514,14 @@ test/
 4. 再次启动 CheckMate
 5. 应触发完整性警告
 6. 应生成 suspicious 备份
+```
+
+测试脚本应使用正式数据库路径：
+
+```python
+from data_guard.paths import get_database_path
+
+DB_PATH = get_database_path()
 ```
 
 ---
@@ -314,6 +553,7 @@ test/
 - 保留可疑数据库副本
 - 从最近自动备份恢复
 - 防止可疑数据库被自动登记为正常数据
+- 将用户数据与程序目录分离，降低更新程序时误删数据的风险
 
 但不能做到：
 
@@ -348,7 +588,7 @@ test/
 可选增强：
 
 - HMAC 校验
-- 数据库迁移到 AppData/Local/CheckMate
 - 数据库加密
 - 导出 / 导入用户数据
 - 定期清理 suspicious 和 before_restore 备份
+- 更正式的日志系统

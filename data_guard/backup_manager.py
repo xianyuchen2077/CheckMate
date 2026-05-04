@@ -1,7 +1,7 @@
 # data_guard/backup_manager.py
 
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from data_guard.paths import (
@@ -13,9 +13,14 @@ from data_guard.paths import (
 
 AUTO_BACKUP_PREFIX = "auto"
 MANUAL_BACKUP_PREFIX = "manual"
-MAX_AUTO_BACKUPS = 10
 SUSPICIOUS_BACKUP_PREFIX = "suspicious"
 RESTORE_BACKUP_PREFIX = "before_restore"
+
+MAX_AUTO_BACKUPS = 5
+MAX_SUSPICIOUS_BACKUPS = 3
+MAX_BEFORE_RESTORE_BACKUPS = 2
+
+SUSPICIOUS_EXPIRE_DAYS = 7
 
 
 def get_timestamp():
@@ -141,13 +146,13 @@ def get_backup_folder_path():
 
 def create_suspicious_backup():
     """
-    创建可疑数据库备份。
-
-    当完整性检查发现数据库可能被外部修改时，
-    不应该立刻刷新 integrity.json，
-    而是先把当前数据库保存为 suspicious 备份。
+    创建可疑数据库备份，并清理旧的可疑备份。
     """
-    return create_backup(SUSPICIOUS_BACKUP_PREFIX)
+    backup_path = create_backup(SUSPICIOUS_BACKUP_PREFIX)
+
+    cleanup_suspicious_backups()
+
+    return backup_path
 
 def list_backups(prefix=None):
     """
@@ -222,6 +227,8 @@ def restore_database_from_backup(backup_path):
     # 恢复前先备份当前数据库，防止误恢复
     before_restore_backup = create_backup(RESTORE_BACKUP_PREFIX)
 
+    cleanup_before_restore_backups()
+
     shutil.copy2(backup_path, db_path)
 
     return {
@@ -247,3 +254,90 @@ def restore_from_latest_auto_backup():
         }
 
     return restore_database_from_backup(latest_backup)
+
+def cleanup_backups_by_count(prefix, max_count):
+    """
+    按数量清理指定类型的备份，只保留最近 max_count 个。
+    """
+    backups = list_backups(prefix)
+
+    old_backups = backups[max_count:]
+
+    deleted_count = 0
+
+    for backup_path in old_backups:
+        try:
+            backup_path.unlink()
+            deleted_count += 1
+        except OSError:
+            pass
+
+    return deleted_count
+
+def cleanup_suspicious_backups(
+    max_count=MAX_SUSPICIOUS_BACKUPS,
+    expire_days=SUSPICIOUS_EXPIRE_DAYS
+):
+    """
+    清理可疑数据库备份。
+
+    策略：
+        1. 删除超过 expire_days 天的 suspicious 备份。
+        2. 再按数量限制，只保留最近 max_count 个。
+    """
+    backups = list_backups(SUSPICIOUS_BACKUP_PREFIX)
+
+    now = datetime.now()
+    expire_before = now - timedelta(days=expire_days)
+
+    deleted_count = 0
+
+    # 1. 先按时间删除过期 suspicious 备份
+    for backup_path in backups:
+        try:
+            modified_time = datetime.fromtimestamp(backup_path.stat().st_mtime)
+
+            if modified_time < expire_before:
+                backup_path.unlink()
+                deleted_count += 1
+
+        except OSError:
+            pass
+
+    # 2. 再按数量限制，只保留最近 max_count 个
+    deleted_count += cleanup_backups_by_count(
+        SUSPICIOUS_BACKUP_PREFIX,
+        max_count
+    )
+
+    return deleted_count
+
+def cleanup_before_restore_backups(
+    max_count=MAX_BEFORE_RESTORE_BACKUPS
+):
+    """
+    清理恢复前保护性备份。
+
+    策略：
+        只保留最近 max_count 个 before_restore 备份。
+    """
+    return cleanup_backups_by_count(
+        RESTORE_BACKUP_PREFIX,
+        max_count
+    )
+
+def cleanup_special_backups():
+    """
+    清理特殊备份文件。
+
+    包括：
+        1. suspicious 可疑备份
+        2. before_restore 恢复前备份
+    """
+    suspicious_deleted = cleanup_suspicious_backups()
+    before_restore_deleted = cleanup_before_restore_backups()
+
+    return {
+        "suspicious_deleted": suspicious_deleted,
+        "before_restore_deleted": before_restore_deleted,
+    }

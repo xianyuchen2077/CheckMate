@@ -1,6 +1,7 @@
 from data_guard.backup_manager import (
     create_auto_backup,
     create_suspicious_backup,
+    cleanup_suspicious_backups,
 )
 
 from data_guard.integrity_manager import (
@@ -55,6 +56,9 @@ def run_startup_data_guard():
 
     auto_backup_path = create_auto_backup()
     print("自动备份结果：", auto_backup_path)
+
+    cleanup_result = cleanup_suspicious_backups()
+    print("特殊备份清理结果：", cleanup_result)
 
     refresh_integrity_record()
 
