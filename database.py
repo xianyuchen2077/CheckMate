@@ -618,23 +618,38 @@ def save_pet_status(
 ):
     """
     保存宠物完整状态。
-    第一版只支持一只宠物，所以固定更新 id = 1。
+    第一版只支持一只宠物，所以固定 id = 1。
+
+    使用 UPSERT：
+        如果 id=1 已存在，则更新；
+        如果 id=1 不存在，则自动插入。
     """
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
-        UPDATE pet_status
-        SET pet_name = ?,
-            skin = ?,
-            level = ?,
-            exp = ?,
-            stage = ?,
-            mood = ?,
-            total_tasks_done = ?,
+        INSERT INTO pet_status (
+            id,
+            pet_name,
+            skin,
+            level,
+            exp,
+            stage,
+            mood,
+            total_tasks_done
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            pet_name = excluded.pet_name,
+            skin = excluded.skin,
+            level = excluded.level,
+            exp = excluded.exp,
+            stage = excluded.stage,
+            mood = excluded.mood,
+            total_tasks_done = excluded.total_tasks_done,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = 1
     """, (
+        1,
         pet_name,
         skin,
         level,
@@ -644,10 +659,25 @@ def save_pet_status(
         total_tasks_done
     ))
 
+    print("[database.save_pet_status] rowcount =", cursor.rowcount)
+    print(
+        "[database.save_pet_status] saved:",
+        "level =", level,
+        "exp =", exp,
+        "stage =", stage,
+        "mood =", mood,
+        "total_tasks_done =", total_tasks_done
+    )
+
     conn.commit()
     conn.close()
 
-    refresh_integrity_after_db_change()
+    # 如果你已经在 database.py 里加了完整性刷新函数，就保留这一句。
+    # 如果没有这个函数，先注释掉。
+    try:
+        refresh_integrity_after_db_change()
+    except NameError:
+        pass
 
 def is_task_done_today(task_id):
     """

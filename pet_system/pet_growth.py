@@ -241,6 +241,8 @@ def add_exp(exp_amount, reason=""):
         total_tasks_done=new_total_tasks_done
     )
 
+    pet_after_save = database.get_pet_status()
+
     message = build_growth_message(
         exp_gained=exp_amount,
         old_level=old_level,

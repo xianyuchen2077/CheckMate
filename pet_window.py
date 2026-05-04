@@ -431,6 +431,7 @@ class PetWindow(QWidget):
             self.pet_stage_label.setText("咸鱼苗")
             self.pet_exp_bar.setValue(0)
             self.pet_exp_label.setText("EXP 0 / 120")
+
             return
 
         pet_name = pet["pet_name"]
@@ -706,12 +707,6 @@ class PetWindow(QWidget):
         dialog.exec()
 
     def print_resource_debug_info(self):
-        print("[PetWindow] ASSETS_DIR:", ASSETS_DIR)
-        print("[PetWindow] PETS_DIR:", PETS_DIR)
-        print("[PetWindow] current_skin:", self.current_skin)
-        print("[PetWindow] current_stage:", self.current_stage)
-        print("[PetWindow] pet_assets_dir:", self.get_pet_assets_dir())
-        print("[PetWindow] image_paths:")
         for state, paths in self.image_paths.items():
             print(f"  {state}:")
             for path in paths:
