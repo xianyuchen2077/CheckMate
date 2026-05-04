@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtGui import QColor, QFont, QIcon, QDesktopServices
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QUrl, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -30,6 +30,7 @@ from pet_system import pet_growth
 from pet_growth_dialog import PetGrowthDialog
 from data_guard.startup_guard import run_startup_data_guard
 from data_guard.migration_manager import migrate_legacy_database_if_needed
+from data_guard.logger import log_info
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -63,7 +64,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         migration_result = migrate_legacy_database_if_needed()
-        print("数据库迁移检查：", migration_result["message"])
+        log_info(f"数据库迁移检查：{migration_result['message']}")
 
         database.init_db()
 
@@ -85,6 +86,8 @@ class MainWindow(QMainWindow):
 
         self.reminder_manager = ReminderManager(self, self.tray_manager, self.pet_window)
         self.reminder_manager.start()
+
+        QTimer.singleShot(0, self.show_data_guard_warning_if_needed)
 
         icon_path = get_icon_path()
         if icon_path:
@@ -250,6 +253,47 @@ class MainWindow(QMainWindow):
     def show_history(self):
         dialog = HistoryDialog(self)
         dialog.exec()
+
+    def show_data_guard_warning_if_needed(self):
+        """
+        如果启动时检测到数据库异常，给用户一个温和提示。
+        """
+        result = getattr(self, "data_guard_result", None)
+
+        if not result:
+            return
+
+        if not result.get("should_warn_user"):
+            return
+
+        status = result.get("status")
+        message = result.get("message", "数据文件可能存在异常。")
+        suspicious_backup_path = result.get("suspicious_backup_path")
+
+        detail_lines = [
+            message,
+            "",
+            "当前数据文件可能被外部修改或发生损坏。",
+        ]
+
+        if suspicious_backup_path:
+            detail_lines.extend([
+                "",
+                "程序已经把当前可疑数据库单独备份，方便之后排查或恢复：",
+                suspicious_backup_path,
+            ])
+
+        detail_lines.extend([
+            "",
+            "你可以继续使用程序。",
+            "如果后续发现数据异常，可以从备份中恢复。",
+        ])
+
+        QMessageBox.warning(
+            self,
+            "数据安全提醒",
+            "\n".join(detail_lines)
+        )
 
     def update_pet_progress(self):
         total, done = database.get_today_stats()

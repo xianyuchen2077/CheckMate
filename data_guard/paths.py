@@ -102,3 +102,18 @@ def ensure_data_guard_dirs():
     """
     get_database_dir().mkdir(parents=True, exist_ok=True)
     get_backup_dir().mkdir(parents=True, exist_ok=True)
+    get_log_dir().mkdir(parents=True, exist_ok=True)
+
+
+def get_log_dir():
+    """
+    获取日志目录。
+    """
+    return get_user_data_root_dir() / "logs"
+
+
+def get_data_guard_log_path():
+    """
+    获取 data_guard 日志文件路径。
+    """
+    return get_log_dir() / "data_guard.log"
