@@ -10,14 +10,22 @@ PROJECT_DIR = Path(__file__).resolve().parent
 MAIN_FILE = PROJECT_DIR / "main.py"
 ASSETS_DIR = PROJECT_DIR / "assets"
 
+# exe 程序图标
 ICON_PNG_FILE = PROJECT_DIR / "assets" / "icons" / "checkmate_icon.png"
 ICON_ICO_FILE = PROJECT_DIR / "assets" / "icons" / "checkmate_icon.ico"
+
+# 快捷方式图标
+SHORTCUT_ICON_PNG_FILE = PROJECT_DIR / "assets" / "icons" / "checkmate_shortcut_icon.png"
+SHORTCUT_ICON_ICO_FILE = PROJECT_DIR / "assets" / "icons" / "checkmate_shortcut_icon.ico"
 
 # PyInstaller 临时构建目录
 BUILD_DIR = PROJECT_DIR / "build"
 
 # 最终发布目录，之后只运行这里面的 exe
 RELEASE_DIR = PROJECT_DIR / "release"
+
+# 快捷方式输出位置
+SHORTCUT_FILE = RELEASE_DIR / f"{APP_NAME}.lnk"
 
 # PyInstaller 默认会生成 spec 文件
 SPEC_FILE = PROJECT_DIR / f"{APP_NAME}.spec"
@@ -52,28 +60,31 @@ def ensure_pyinstaller():
         print("未检测到 PyInstaller，正在安装...")
         run_command([sys.executable, "-m", "pip", "install", "-U", "pyinstaller"])
 
-def ensure_icon_file():
+def ensure_pywin32():
     """
-    确保存在 exe 可用的 .ico 图标。
-
-    开发时主要维护：
-        assets/icons/checkmate_icon.png
-
-    打包时自动生成：
-        assets/icons/checkmate_icon.ico
-
-    说明：
-        Windows exe 图标建议使用 .ico。
-        PyInstaller 的 --icon 虽然有时可以接收部分图片格式，
-        但 .ico 是最稳的。
+    确保 pywin32 可用，用于创建 Windows 快捷方式。
     """
-    if ICON_ICO_FILE.exists():
-        print(f"已找到 ico 图标：{ICON_ICO_FILE}")
-        return
+    try:
+        import win32com.client
+        print("pywin32 已安装。")
+    except ImportError:
+        print("未检测到 pywin32，正在安装...")
+        run_command([sys.executable, "-m", "pip", "install", "pywin32"])
 
-    if not ICON_PNG_FILE.exists():
-        print("未找到 PNG 图标，也未找到 ICO 图标，跳过 exe 图标设置。")
-        return
+def ensure_ico_file(png_file, ico_file, label="图标"):
+    """
+    确保存在可用的 .ico 图标。
+
+    如果 ico 已存在，则直接使用。
+    如果 ico 不存在，但 png 存在，则自动从 png 生成 ico。
+    """
+    if ico_file.exists():
+        print(f"已找到 {label} ico 图标：{ico_file}")
+        return True
+
+    if not png_file.exists():
+        print(f"未找到 {label} PNG 图标，也未找到 ICO 图标：{png_file}")
+        return False
 
     try:
         from PIL import Image
@@ -82,12 +93,12 @@ def ensure_icon_file():
         run_command([sys.executable, "-m", "pip", "install", "pillow"])
         from PIL import Image
 
-    ICON_ICO_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ico_file.parent.mkdir(parents=True, exist_ok=True)
 
-    image = Image.open(ICON_PNG_FILE).convert("RGBA")
+    image = Image.open(png_file).convert("RGBA")
 
     image.save(
-        ICON_ICO_FILE,
+        ico_file,
         format="ICO",
         sizes=[
             (16, 16),
@@ -100,7 +111,24 @@ def ensure_icon_file():
         ]
     )
 
-    print(f"已根据 PNG 生成 ico 图标：{ICON_ICO_FILE}")
+    print(f"已根据 PNG 生成 {label} ico 图标：{ico_file}")
+    return True
+
+def ensure_icon_file():
+    """
+    确保 exe 图标和快捷方式图标都存在。
+    """
+    ensure_ico_file(
+        ICON_PNG_FILE,
+        ICON_ICO_FILE,
+        label="exe"
+    )
+
+    ensure_ico_file(
+        SHORTCUT_ICON_PNG_FILE,
+        SHORTCUT_ICON_ICO_FILE,
+        label="快捷方式"
+    )
 
 def clean_old_build():
     print("\n清理旧打包文件...")
@@ -197,6 +225,57 @@ def check_build_result():
     print("=" * 60)
 
 
+def create_release_shortcut():
+    """
+    在 release 目录下创建 CheckMate 快捷方式。
+
+    快捷方式位置：
+        release/CheckMate.lnk
+
+    指向：
+        release/CheckMate/CheckMate.exe
+
+    图标：
+        assets/icons/checkmate_shortcut_icon.ico
+    """
+    exe_path = RELEASE_DIR / APP_NAME / f"{APP_NAME}.exe"
+
+    if not exe_path.exists():
+        print("\n未找到 exe，无法创建快捷方式：")
+        print(exe_path)
+        return
+
+    try:
+        import win32com.client
+    except ImportError:
+        print("\n未安装 pywin32，无法创建快捷方式。")
+        print("请先运行：pip install pywin32")
+        return
+
+    SHORTCUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    shell = win32com.client.Dispatch("WScript.Shell")
+    shortcut = shell.CreateShortcut(str(SHORTCUT_FILE))
+
+    shortcut.TargetPath = str(exe_path)
+    shortcut.WorkingDirectory = str(exe_path.parent)
+    shortcut.Description = "CheckMate - 不要成为咸鱼"
+
+    if SHORTCUT_ICON_ICO_FILE.exists():
+        shortcut.IconLocation = str(SHORTCUT_ICON_ICO_FILE)
+        print(f"快捷方式将使用专用图标：{SHORTCUT_ICON_ICO_FILE}")
+    elif ICON_ICO_FILE.exists():
+        shortcut.IconLocation = str(ICON_ICO_FILE)
+        print(f"未找到快捷方式专用图标，回退使用 exe 图标：{ICON_ICO_FILE}")
+    else:
+        print("未找到 ico 图标，快捷方式将使用默认图标。")
+
+    shortcut.Save()
+
+    print("\n已创建快捷方式：")
+    print(SHORTCUT_FILE)
+
+
 def clean_temp_build_dir():
     """
     删除 PyInstaller 临时 build 目录，避免误运行 build 里的文件。
@@ -213,10 +292,12 @@ def main():
 
     check_main_file()
     ensure_pyinstaller()
+    ensure_pywin32()
     ensure_icon_file()
     clean_old_build()
     build_exe()
     check_build_result()
+    create_release_shortcut()
     clean_temp_build_dir()
 
 
