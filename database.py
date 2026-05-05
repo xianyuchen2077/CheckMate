@@ -280,22 +280,55 @@ def update_task(
     conn = get_connection()
     cursor = conn.cursor()
 
+    # 先读取旧任务类型，用于判断是否发生 habit -> task 的切换
     cursor.execute("""
-        UPDATE tasks
-        SET title = ?,
-            remind_time = ?,
-            description = ?,
-            repeat_interval_minutes = ?,
-            task_type = ?
+        SELECT task_type
+        FROM tasks
         WHERE id = ?
-    """, (
-        title,
-        remind_time,
-        description,
-        repeat_interval_minutes,
-        task_type,
-        task_id
-    ))
+    """, (task_id,))
+    old_task = cursor.fetchone()
+
+    old_task_type = old_task["task_type"] if old_task else None
+
+    # 如果从“习惯”切换为“一次性任务”，需要把 created_at 更新为当前时间。
+    # 否则旧习惯可能因为 created_at 不是今天，被今日任务列表过滤掉，看起来像“消失”。
+    if old_task_type != "task" and task_type == "task":
+        cursor.execute("""
+            UPDATE tasks
+            SET title = ?,
+                remind_time = ?,
+                description = ?,
+                repeat_interval_minutes = ?,
+                task_type = ?,
+                created_at = CURRENT_TIMESTAMP,
+                is_archived = 0
+            WHERE id = ?
+        """, (
+            title,
+            remind_time,
+            description,
+            repeat_interval_minutes,
+            task_type,
+            task_id
+        ))
+    else:
+        cursor.execute("""
+            UPDATE tasks
+            SET title = ?,
+                remind_time = ?,
+                description = ?,
+                repeat_interval_minutes = ?,
+                task_type = ?,
+                is_archived = 0
+            WHERE id = ?
+        """, (
+            title,
+            remind_time,
+            description,
+            repeat_interval_minutes,
+            task_type,
+            task_id
+        ))
 
     conn.commit()
     conn.close()

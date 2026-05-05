@@ -504,39 +504,55 @@ class MainWindow(QMainWindow):
             task_type=task["task_type"]
         )
 
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            title, remind_time, description, repeat_interval_minutes, task_type = dialog.get_data()
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
 
-            if not title:
-                QMessageBox.information(self, "提示", "任务名称不能为空。")
-                return
+        title, remind_time, description, repeat_interval_minutes, task_type = dialog.get_data()
 
-            database.update_task(
-                task_id,
-                title,
-                remind_time,
-                description,
-                repeat_interval_minutes,
-                task_type
-            )
+        if not title:
+            QMessageBox.information(self, "提示", "任务名称不能为空。")
+            return
 
-            if hasattr(self, "reminder_manager") and self.reminder_manager is not None:
-                self.reminder_manager.reset_repeat_timer_for_task(task_id)
+        # 用关键字参数，避免 title / remind_time / description /
+        # repeat_interval_minutes / task_type 顺序错位
+        database.update_task(
+            task_id=task_id,
+            title=title,
+            remind_time=remind_time,
+            description=description,
+            repeat_interval_minutes=repeat_interval_minutes,
+            task_type=task_type
+        )
 
-                if self.is_repeat_task(repeat_interval_minutes) and remind_time:
-                    self.reminder_manager.schedule_repeat_if_needed(
-                        task_id,
-                        title,
-                        remind_time,
-                        repeat_interval_minutes
-                    )
+        # 编辑后，同步提醒管理器
+        if hasattr(self, "reminder_manager") and self.reminder_manager is not None:
+            # 不管新任务是否重复，都先清掉旧的重复提醒计时器
+            self.reminder_manager.reset_repeat_timer_for_task(task_id)
 
-            if remind_time:
-                self.tip_label.setText(f"任务已更新：{title}，提醒时间：{remind_time}")
-            else:
-                self.tip_label.setText(f"任务已更新：{title}，未设置提醒时间")
+            # 只有“设置了提醒时间”且“是重复任务”时，才重新安排下一次重复提醒
+            if remind_time and self.is_repeat_task(repeat_interval_minutes):
+                self.reminder_manager.schedule_repeat_if_needed(
+                    task_id,
+                    title,
+                    remind_time,
+                    repeat_interval_minutes
+                )
 
-            self.load_tasks()
+        if remind_time:
+            self.tip_label.setText(f"任务已更新：{title}，提醒时间：{remind_time}")
+        else:
+            self.tip_label.setText(f"任务已更新：{title}，未设置提醒时间")
+
+        self.load_tasks()
+
+        # 尝试重新选中刚刚编辑的任务
+        # 如果任务仍在今日任务列表中，就自动选回来
+        for row in range(self.task_list.count()):
+            item = self.task_list.item(row)
+
+            if item.data(1000) == task_id:
+                self.task_list.setCurrentItem(item)
+                break
 
     def complete_task(self):
         current_item = self.task_list.currentItem()
@@ -738,10 +754,15 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def is_repeat_task(self, repeat_interval_minutes):
-        """
-        判断是否为周期性重复提醒任务。
-        """
-        return repeat_interval_minutes is not None and repeat_interval_minutes > 0
+        try:
+            if repeat_interval_minutes is None:
+                return False
+
+            repeat_interval_minutes = int(repeat_interval_minutes)
+            return repeat_interval_minutes > 0
+
+        except (TypeError, ValueError):
+            return False
 
 
     def get_task_icon(self, is_active, is_done_today, repeat_interval_minutes):

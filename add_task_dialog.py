@@ -335,10 +335,10 @@ class AddTaskDialog(QDialog):
 
         if self.enable_time_checkbox.isChecked():
             remind_time = self.time_edit.time().toString("HH:mm")
+            repeat_interval_minutes = self.repeat_widget.get_repeat_interval_minutes()
         else:
             remind_time = None
-
-        repeat_interval_minutes = self.repeat_widget.get_repeat_interval_minutes()
+            repeat_interval_minutes = None
 
         task_type = "habit" if self.task_type_switch.isChecked() else "task"
 
