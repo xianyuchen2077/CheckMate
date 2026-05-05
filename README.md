@@ -9,7 +9,7 @@ CheckMate 是一个使用 **Python + PySide6 + SQLite** 开发的 Windows 桌面
 
 - 管理每日任务和长期习惯
 - 到点提醒用户完成任务
-- 关闭主窗口后仍在后台运行
+- 关闭主窗口后仍在系统托盘后台运行
 - 通过桌面宠物进行陪伴和督促
 - 完成任务后获得宠物经验
 - 通过升级、进化、历史记录和统计反馈形成正向激励
@@ -42,10 +42,10 @@ CheckMate 不是复杂的项目管理软件，也不是团队协作工具。
 
 CheckMate 当前支持两类事项：
 
-| 类型 | 说明                                                               |
-| ---- | ------------------------------------------------------------------ |
-| 任务 | 一次性任务，只在创建当天显示；第二天自动归档，不再出现在今日任务中 |
-| 习惯 | 长期习惯，每天保留，继续显示、提醒和统计                           |
+| 类型 | 说明                                                                                     |
+| ---- | ---------------------------------------------------------------------------------------- |
+| 任务 | 一次性待办任务。完成后第二天归档；未完成会顺延到下一天；暂停中的任务不管完成与否都会顺延 |
+| 习惯 | 长期习惯。每天保留，继续显示、提醒和统计                                                 |
 
 当前支持：
 
@@ -63,6 +63,71 @@ CheckMate 当前支持两类事项：
 
 ---
 
+### 每日刷新规则
+
+CheckMate 使用 `task_date` 表示任务当前属于哪一天。
+
+```text
+created_at：
+    真实创建时间，不随每日刷新改变。
+
+task_date：
+    当前任务属于哪一天。
+    每日刷新时会根据任务类型、完成状态和暂停状态更新。
+```
+
+每日 0 点或程序启动时会执行刷新：
+
+| 类型       | 状态           | 第二天行为                             |
+| ---------- | -------------- | -------------------------------------- |
+| 习惯 habit | 不管完成与否   | 更新到今天，继续显示                   |
+| 任务 task  | 启用中，已完成 | 归档，不再显示到今日任务               |
+| 任务 task  | 启用中，未完成 | 顺延到今天，继续显示                   |
+| 任务 task  | 暂停中         | 不管完成与否，都顺延到今天，并保持暂停 |
+| 已归档任务 | 任意状态       | 跳过，不再处理                         |
+
+规则总结：
+
+```text
+习惯每天自然刷新；
+一次性任务未完成则顺延；
+一次性任务完成后归档；
+暂停中的一次性任务统一顺延；
+已归档任务只保留给历史记录。
+```
+
+---
+
+### 历史记录规则
+
+历史记录不按 `task_type`、`is_archived`、`is_active` 额外过滤。
+
+只要一个任务在某一天“存在过”，就应该出现在那一天的历史记录中。
+
+存在区间：
+
+```text
+habit：
+    从 created_at 到今天都存在。
+
+task：
+    从 created_at 到 task_date 都存在。
+```
+
+示例：
+
+```text
+一次性任务 5 月 1 日创建，5 月 3 日才完成：
+    5 月 1 日：显示未完成
+    5 月 2 日：显示未完成
+    5 月 3 日：显示已完成
+    5 月 4 日：不再显示
+```
+
+完成状态由 `checkins` 表决定。
+
+---
+
 ### 每日打卡
 
 - 每日任务打卡
@@ -74,6 +139,7 @@ CheckMate 当前支持两类事项：
 - 任务详情面板
 - 普通任务今日完成后不会重复打卡
 - 重复提醒任务可以完成多轮
+- 重复提醒任务每天至少完成一次时会写入当日 `checkins`，用于第二天判断是否应归档
 
 ---
 
@@ -88,6 +154,7 @@ CheckMate 当前支持两类事项：
 - 支持自定义稍后提醒时间
 - 支持“今天不再提醒”
 - 支持重复提醒任务继续安排下一轮提醒
+- 支持显示运行时下一次真实提醒时间
 
 ---
 
@@ -112,10 +179,41 @@ CheckMate 当前支持两类事项：
 ↓
 宠物获得经验
 ↓
+记录今天至少完成过一次
+↓
 继续安排下一轮提醒
 ```
 
 重复提醒任务不会因为当天已经打卡而停止后续提醒。
+
+---
+
+### 稍后提醒与重复提醒规则
+
+如果重复提醒任务选择“稍后提醒”，稍后提醒时间会成为新的重复提醒起点。
+
+示例：
+
+```text
+原提醒时间：09:00
+重复间隔：1 小时
+
+09:00 弹出提醒
+用户选择 30 分钟后提醒
+↓
+09:30 再次提醒
+用户点击完成
+↓
+下一次提醒变为 10:30
+```
+
+这可以避免重复任务产生多条提醒链路。
+
+原则：
+
+```text
+同一个 task_id 同一时间只允许存在一个活跃提醒计时器。
+```
 
 ---
 
@@ -143,6 +241,27 @@ CheckMate 当前支持两类事项：
 - 托盘菜单支持显示桌面宠物
 - 托盘菜单支持退出程序
 - 支持开机自启动
+
+---
+
+### 通知图标
+
+当前通知采用 `QSystemTrayIcon.showMessage()`。
+
+已支持通过 `icon_type` 区分不同通知类型，并临时切换托盘图标：
+
+| icon_type  | 图标文件              | 用途                |
+| ---------- | --------------------- | ------------------- |
+| `default`  | `checkmate_icon.png`  | 默认通知            |
+| `reminder` | `notify_reminder.png` | 到点提醒            |
+| `done`     | `notify_done.png`     | 完成打卡            |
+| `snooze`   | `notify_snooze.png`   | 稍后提醒            |
+| `warning`  | `notify_warning.png`  | 警告 / 今天不再提醒 |
+| `success`  | `notify_success.png`  | 成功提示            |
+
+当前方案能比较稳定地临时切换系统托盘图标，但 Windows 通知弹窗里的大图标不保证完全可控。
+
+后续计划单独测试 Windows Toast 通知，用于增强通知卡片大图标、按钮和交互能力。
 
 ---
 
@@ -283,17 +402,6 @@ stage_1 的 png
 皮肤根目录的 png
 ```
 
-例如当前宠物为 `salty_fish`，当前阶段为 `stage_2`，状态为 `done` 时，会依次查找：
-
-```text
-assets/pets/salty_fish/stage_2/pet_done.gif
-assets/pets/salty_fish/stage_2/pet_done.png
-assets/pets/salty_fish/stage_1/pet_done.gif
-assets/pets/salty_fish/stage_1/pet_done.png
-assets/pets/salty_fish/pet_done.gif
-assets/pets/salty_fish/pet_done.png
-```
-
 如果都找不到，则显示默认 emoji：
 
 ```text
@@ -302,21 +410,35 @@ assets/pets/salty_fish/pet_done.png
 
 ---
 
-## 应用图标资源
+## 图标资源
 
-应用图标建议放在：
+图标资源建议放在：
 
 ```text
 assets/
 └── icons/
     ├── checkmate_icon.png
-    └── checkmate_icon.ico
+    ├── checkmate_icon.ico
+    ├── checkmate_shortcut_icon.png
+    ├── checkmate_shortcut_icon.ico
+    ├── notify_reminder.png
+    ├── notify_done.png
+    ├── notify_snooze.png
+    ├── notify_warning.png
+    └── notify_success.png
 ```
 
-| 文件                 | 用途                             |
-| -------------------- | -------------------------------- |
-| `checkmate_icon.png` | 开发环境下用于窗口图标、托盘图标 |
-| `checkmate_icon.ico` | 打包 exe 时用于程序图标          |
+| 文件                          | 用途                             |
+| ----------------------------- | -------------------------------- |
+| `checkmate_icon.png`          | 开发环境下用于窗口图标、托盘图标 |
+| `checkmate_icon.ico`          | 打包 exe 时用于程序图标          |
+| `checkmate_shortcut_icon.png` | 快捷方式专用 PNG 源图            |
+| `checkmate_shortcut_icon.ico` | 快捷方式专用图标                 |
+| `notify_reminder.png`         | 到点提醒通知图标                 |
+| `notify_done.png`             | 完成打卡通知图标                 |
+| `notify_snooze.png`           | 稍后提醒通知图标                 |
+| `notify_warning.png`          | 警告类通知图标                   |
+| `notify_success.png`          | 成功类通知图标                   |
 
 ---
 
@@ -332,8 +454,6 @@ assets/backgrounds/main_bg.png
 
 如果背景图片不存在，程序会使用默认浅色背景。
 
----
-
 ### 添加任务弹窗背景
 
 推荐路径：
@@ -348,19 +468,21 @@ assets/backgrounds/add_task_bg.png
 
 ## 技术栈
 
-| 模块       | 技术                   |
-| ---------- | ---------------------- |
-| 编程语言   | Python                 |
-| GUI 框架   | PySide6                |
-| 数据库     | SQLite                 |
-| 定时器     | QTimer                 |
-| 系统托盘   | QSystemTrayIcon        |
-| 桌面宠物   | QWidget 无边框置顶窗口 |
-| 静态图片   | QPixmap                |
-| GIF 动画   | QMovie                 |
-| 进度条     | QProgressBar           |
-| 开机自启动 | Windows 注册表 Run 项  |
-| 打包工具   | PyInstaller            |
+| 模块         | 技术                   |
+| ------------ | ---------------------- |
+| 编程语言     | Python                 |
+| GUI 框架     | PySide6                |
+| 数据库       | SQLite                 |
+| 定时器       | QTimer                 |
+| 系统托盘     | QSystemTrayIcon        |
+| 桌面宠物     | QWidget 无边框置顶窗口 |
+| 静态图片     | QPixmap                |
+| GIF 动画     | QMovie                 |
+| 进度条       | QProgressBar           |
+| 开机自启动   | Windows 注册表 Run 项  |
+| 打包工具     | PyInstaller            |
+| 快捷方式创建 | pywin32                |
+| PNG 转 ICO   | Pillow                 |
 
 ---
 
@@ -374,6 +496,8 @@ Windows 10 / Windows 11
 PySide6
 SQLite
 PyInstaller
+Pillow
+pywin32
 ```
 
 安装依赖：
@@ -440,13 +564,25 @@ build_exe.py
 python build_exe.py
 ```
 
+当前推荐使用 `--onedir` 模式，因为 PySide6 和图片 / GIF 资源较多，`onedir` 模式更稳定，也更方便排查资源路径问题。
+
 打包结果默认输出到：
 
 ```text
-dist/CheckMate/CheckMate.exe
+release/
+├── CheckMate.lnk
+└── CheckMate/
+    ├── CheckMate.exe
+    ├── _internal/
+    └── ...
 ```
 
-当前推荐使用 `--onedir` 模式，因为 PySide6 和图片 / GIF 资源较多，`onedir` 模式更稳定，也更方便排查资源路径问题。
+说明：
+
+- `CheckMate.exe` 使用 `checkmate_icon.ico`
+- `CheckMate.lnk` 使用 `checkmate_shortcut_icon.ico`
+- 如果只有 PNG，打包脚本会尝试用 Pillow 自动生成对应 ICO
+- 快捷方式由 `pywin32` 创建
 
 ---
 
@@ -490,7 +626,14 @@ CheckMate/
 │   │   └── add_task_bg.png
 │   ├── icons/
 │   │   ├── checkmate_icon.png
-│   │   └── checkmate_icon.ico
+│   │   ├── checkmate_icon.ico
+│   │   ├── checkmate_shortcut_icon.png
+│   │   ├── checkmate_shortcut_icon.ico
+│   │   ├── notify_reminder.png
+│   │   ├── notify_done.png
+│   │   ├── notify_snooze.png
+│   │   ├── notify_warning.png
+│   │   └── notify_success.png
 │   └── pets/
 │       └── salty_fish/
 │           ├── stage_1/
@@ -501,7 +644,9 @@ CheckMate/
     ├── README.md
     ├── test_tamper_db.py
     ├── test_restore_latest_backup.py
-    └── test_trust_current_database.py
+    ├── test_trust_current_database.py
+    ├── test_tray_icons.py
+    └── test_daily_refresh_and_history.py
 ```
 
 ---
@@ -543,7 +688,8 @@ CheckMate/
 - 初始化提醒管理器
 - 加载主窗口背景图片
 - 完成任务后触发宠物经验增长
-- 启动时调用数据迁移、数据归档和数据安全检查
+- 启动时调用数据迁移、每日任务刷新和数据安全检查
+- 运行中检测跨天并触发每日刷新
 
 ---
 
@@ -558,6 +704,7 @@ CheckMate/
 - 可选设置提醒时间
 - 可选设置重复提醒
 - 支持任务 / 习惯切换
+- 支持任务 / 习惯滑动开关 UI
 - 支持背景图片
 - 背景图片不存在时使用浅灰色背景兜底
 - 返回任务数据给主窗口
@@ -573,6 +720,13 @@ title, remind_time, description, repeat_interval_minutes, task_type
 ```text
 task_type = "task"   # 一次性任务
 task_type = "habit"  # 长期习惯
+```
+
+如果未勾选提醒时间：
+
+```text
+remind_time = None
+repeat_interval_minutes = None
 ```
 
 ---
@@ -599,7 +753,8 @@ task_type = "habit"  # 长期习惯
 - 显示最近若干天的打卡记录
 - 显示每日任务完成情况
 - 显示任务备注
-- 支持查看已归档的一次性任务在创建当天的完成情况
+- 显示当天存在过的任务
+- 不因为任务归档、暂停或类型不同而额外隐藏历史记录
 
 ---
 
@@ -635,41 +790,13 @@ task_type = "habit"  # 长期习惯
 - 安排下一次稍后提醒
 - 处理“今天不再提醒”
 - 处理重复提醒任务的下一轮提醒
+- 管理重复提醒计时器
+- 管理稍后提醒计时器
+- 维护运行时下一次提醒时间
+- 跨天后清空当天提醒缓存
 - 通知桌面宠物切换状态
 - 发送系统托盘通知
 - 提醒弹窗完成任务后触发宠物经验增长
-
----
-
-### `pet_growth_dialog.py`
-
-宠物成长提示弹窗。
-
-主要职责：
-
-- 显示获得经验
-- 显示升级结果
-- 显示进化结果
-- 显示等级变化
-- 显示阶段变化
-
-普通加经验时可以只更新主界面提示。  
-升级或进化时弹出该窗口。
-
----
-
-### `pet_settings_dialog.py`
-
-宠物设置弹窗。
-
-主要职责：
-
-- 调整宠物窗口透明度
-- 设置启动时是否显示宠物
-- 设置宠物窗口是否始终置顶
-- 保存宠物当前位置
-- 让宠物回到右下角
-- 恢复宠物默认设置
 
 ---
 
@@ -686,6 +813,7 @@ task_type = "habit"  # 长期习惯
 - 开启 / 关闭开机自启动
 - 退出程序
 - 发送托盘通知
+- 根据通知类型临时切换托盘图标
 
 ---
 
@@ -755,7 +883,9 @@ task_type = "habit"  # 长期习惯
 - 查询当前需要提醒的任务
 - 获取宠物状态
 - 保存宠物状态
-- 归档过期一次性任务
+- 根据 `task_date` 执行每日任务刷新
+- 归档已完成的一次性任务
+- 顺延未完成或暂停的一次性任务
 
 ---
 
@@ -786,6 +916,8 @@ task_type = "habit"  # 长期习惯
 
 - 读取配置文件
 - 保存配置文件
+- 将 `config.json` 保存到 AppData 用户数据目录
+- 迁移旧项目目录中的配置文件
 - 管理宠物显示配置
 - 管理宠物窗口位置
 - 管理宠物透明度
@@ -806,6 +938,7 @@ task_type = "habit"  # 长期习惯
 - 支持主窗口背景图片
 - 支持添加任务弹窗背景图片
 - 集中管理文字颜色、输入框颜色、按钮颜色
+- 管理任务 / 习惯开关文字状态样式
 
 ---
 
@@ -831,10 +964,16 @@ Windows 下通过当前用户注册表 Run 项实现。
 主要职责：
 
 - 检查 PyInstaller 是否安装
+- 检查 Pillow 是否安装
+- 检查 pywin32 是否安装
 - 清理旧打包产物
+- 自动将 PNG 图标转换为 ICO
 - 打包主程序
 - 将 `assets/` 资源文件夹一起打包
-- 指定应用图标
+- 指定 exe 图标
+- 创建 release 目录
+- 创建 `CheckMate.lnk` 快捷方式
+- 为快捷方式设置专用图标
 - 输出 Windows 可执行程序
 
 ---
@@ -859,6 +998,7 @@ C:\Users\用户名\AppData\Local\CheckMate\
 
 ```text
 %LOCALAPPDATA%\CheckMate\
+├── config.json
 ├── data/
 │   └── checkmate.db
 ├── data_backups/
@@ -867,12 +1007,11 @@ C:\Users\用户名\AppData\Local\CheckMate\
 │   ├── before_restore_checkmate_xxx.db
 │   ├── integrity.json
 │   └── migration_done.txt
-├── logs/
-│   └── data_guard.log
-└── config.json
+└── logs/
+    └── data_guard.log
 ```
 
-这样即使用户更新、删除或替换程序目录，任务、习惯、打卡记录和宠物进度也不会被一起删除。
+这样即使用户更新、删除或替换程序目录，任务、习惯、打卡记录、宠物进度和用户配置也不会被一起删除。
 
 ---
 
@@ -904,6 +1043,7 @@ task_type
 is_archived
 is_active
 created_at
+task_date
 ```
 
 | 字段                      | 含义                                              |
@@ -915,8 +1055,9 @@ created_at
 | `repeat_interval_minutes` | 重复提醒间隔，可为空                              |
 | `task_type`               | 类型，`task` 表示一次性任务，`habit` 表示长期习惯 |
 | `is_archived`             | 是否归档，0 表示未归档，1 表示已归档              |
-| `is_active`               | 是否启用                                          |
-| `created_at`              | 创建时间                                          |
+| `is_active`               | 是否启用，0 表示暂停，1 表示启用                  |
+| `created_at`              | 真实创建时间                                      |
+| `task_date`               | 当前任务属于哪一天                                |
 
 ---
 
@@ -941,6 +1082,8 @@ checkin_time
 | `checkin_time` | 具体打卡时间 |
 
 同一个普通任务在同一天只能打卡一次。
+
+重复提醒任务一天可以完成多轮，但 `checkins` 至少需要记录当天完成过一次，用于每日刷新时判断是否归档。
 
 ---
 
@@ -975,49 +1118,6 @@ updated_at
 | `total_tasks_done` | 累计完成任务数                 |
 | `created_at`       | 创建时间                       |
 | `updated_at`       | 更新时间                       |
-
----
-
-## 任务 / 习惯刷新规则
-
-### 一次性任务
-
-```text
-task_type = "task"
-```
-
-规则：
-
-- 只在创建当天显示
-- 只在创建当天提醒
-- 第二天启动程序时自动归档
-- 归档后不再出现在今日任务中
-- 归档后不再触发提醒
-- 不删除任务记录
-- 不删除打卡记录
-- 历史记录中仍能看到创建当天是否完成
-
-归档字段：
-
-```text
-is_archived = 1
-```
-
----
-
-### 长期习惯
-
-```text
-task_type = "habit"
-```
-
-规则：
-
-- 每天保留
-- 每天显示
-- 每天可以提醒
-- 每天可以打卡
-- 历史记录中持续显示
 
 ---
 
@@ -1122,7 +1222,7 @@ main.py
   ↓
 初始化数据库
   ↓
-归档过期一次性任务
+每日任务刷新
   ↓
 运行数据安全检查
   ↓
@@ -1133,6 +1233,8 @@ main.py
 初始化桌面宠物
   ↓
 初始化提醒管理器
+  ↓
+启动跨天刷新检查
   ↓
 进入 Qt 事件循环
 ```
@@ -1226,8 +1328,6 @@ pet_growth.add_exp_for_completed_task(task)
 如果升级 / 进化，显示 PetGrowthDialog
 ```
 
-重复提醒任务完成时不走每日唯一打卡限制，但仍然可以触发宠物经验增长和状态刷新。
-
 ---
 
 ## 测试脚本
@@ -1240,11 +1340,13 @@ test/
 
 当前常用脚本：
 
-| 文件                             | 用途                               |
-| -------------------------------- | ---------------------------------- |
-| `test_tamper_db.py`              | 模拟外部篡改数据库                 |
-| `test_restore_latest_backup.py`  | 从最近自动备份恢复数据库           |
-| `test_trust_current_database.py` | 强制信任当前数据库并刷新完整性记录 |
+| 文件                                | 用途                               |
+| ----------------------------------- | ---------------------------------- |
+| `test_tamper_db.py`                 | 模拟外部篡改数据库                 |
+| `test_restore_latest_backup.py`     | 从最近自动备份恢复数据库           |
+| `test_trust_current_database.py`    | 强制信任当前数据库并刷新完整性记录 |
+| `test_tray_icons.py`                | 测试系统托盘通知图标               |
+| `test_daily_refresh_and_history.py` | 测试每日刷新规则与历史记录存在区间 |
 
 测试说明见：
 
@@ -1328,28 +1430,6 @@ color: #0891b2;
 color: #2563eb;
 ```
 
-推荐使用：
-
-```css
-/* 正文深色 */
-color: #111827;
-
-/* 次要文字 */
-color: #6b7280;
-
-/* 提醒 / 危险 */
-color: #dc2626;
-
-/* 完成 / 成功 */
-color: #16a34a;
-
-/* 主要按钮 / 强调 */
-color: #2563eb;
-
-/* 深色背景上的文字 */
-color: #ffffff;
-```
-
 ---
 
 ## Git 说明
@@ -1364,6 +1444,7 @@ __pycache__/
 *.pyc
 
 build/
+release/
 dist/
 *.spec
 
@@ -1394,32 +1475,13 @@ test 测试脚本
 ```text
 .venv/
 build/
+release/
 dist/
 data/
 data_backups/
 logs/
 __pycache__/
 ```
-
----
-
-## requirements.txt
-
-`requirements.txt` 用来记录项目依赖。
-
-生成方式：
-
-```bash
-pip freeze > requirements.txt
-```
-
-安装方式：
-
-```bash
-pip install -r requirements.txt
-```
-
-这样就不需要上传 `.venv/` 到 Git 仓库。
 
 ---
 
@@ -1431,10 +1493,11 @@ pip install -r requirements.txt
 - 任务删除
 - 任务备注
 - 任务 / 习惯切换
-- 一次性任务自动归档
+- 任务 / 习惯开关 UI
 - 每日打卡
 - SQLite 本地保存
 - AppData 数据目录迁移
+- config.json 保存到 AppData
 - 数据自动备份
 - 数据完整性校验
 - 数据异常提醒
@@ -1447,10 +1510,13 @@ pip install -r requirements.txt
 - 主窗口任务详情面板
 - 任务提醒时间
 - 重复提醒
+- snooze 接管重复提醒起点
+- 下一次提醒时间运行时展示
 - 美化提醒弹窗
 - 稍后提醒选项
 - 自定义稍后提醒时间
 - 系统托盘后台运行
+- 通知 icon_type 分流
 - 开机自启动
 - 桌面宠物浮窗
 - 宠物图片 / GIF 加载
@@ -1466,11 +1532,15 @@ pip install -r requirements.txt
 - 添加任务弹窗背景图片
 - 应用图标
 - 自动打包脚本
+- release 目录输出
+- 快捷方式自动生成
+- 快捷方式专用图标
 
 ---
 
 ## 后续计划
 
+- 完成并稳定 `task_date` 每日刷新规则测试
 - 设置页面
 - 数据管理 UI
   - 打开数据文件夹
@@ -1478,6 +1548,10 @@ pip install -r requirements.txt
   - 立即备份
   - 从备份恢复
   - 信任当前数据库
+- Windows Toast 通知测试
+  - 自定义通知大图标
+  - 通知点击行为
+  - 通知按钮
 - 宠物详情窗口
 - 任务分类 / 标签
 - 任务优先级
@@ -1546,15 +1620,18 @@ pip install -r requirements.txt
 
 ---
 
-### 4. 提醒音效
+### 4. Toast 通知增强
 
-可以在提醒弹窗出现时播放声音。
+当前 Qt 托盘通知无法完全控制 Windows 通知卡片大图标。
 
-可选方案：
+后续可以单独测试 Windows Toast 通知，用于实现：
 
-- `QSoundEffect`
-- `winsound`
-- 第三方音频库
+- 不同提醒类型显示不同大图标
+- 点击通知打开主窗口
+- 通知按钮
+- 通知分组
+
+建议先做独立测试脚本，再决定是否接入主流程。
 
 ---
 
@@ -1568,19 +1645,6 @@ pip install -r requirements.txt
 - 最常拖延任务
 - 最稳定任务
 - 咸鱼值变化曲线
-
----
-
-### 6. 打包发布
-
-后续可以继续完善：
-
-- 应用图标
-- 版本号
-- 自动清理旧版本
-- 生成 zip 包
-- 生成安装包
-- 发布到 GitHub Releases
 
 ---
 
@@ -1616,8 +1680,9 @@ CheckMate 目前已经可以作为一个本地打卡提醒与宠物养成工具�
 
 后续重点可以放在：
 
-1. 完善设置页面和数据管理入口
-2. 完善宠物详情和成就系统
-3. 提升 UI 视觉效果
-4. 增强统计和复盘能力
-5. 制作更正式的 Windows 发布版本
+1. 稳定 `task_date` 每日刷新与历史记录规则
+2. 完善设置页面和数据管理入口
+3. 完善宠物详情和成就系统
+4. 提升 UI 视觉效果
+5. 增强统计和复盘能力
+6. 制作更正式的 Windows 发布版本

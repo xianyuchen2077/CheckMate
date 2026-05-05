@@ -178,6 +178,8 @@ class MainWindow(QMainWindow):
 
         stats_card = QFrame()
         stats_card.setObjectName("card")
+        stats_card.setMinimumHeight(180)
+
         stats_layout = QVBoxLayout()
         stats_layout.setSpacing(10)
         stats_card.setLayout(stats_layout)
@@ -198,6 +200,8 @@ class MainWindow(QMainWindow):
 
         tip_card = QFrame()
         tip_card.setObjectName("card")
+        tip_card.setMinimumHeight(150)
+
         tip_layout = QVBoxLayout()
         tip_card.setLayout(tip_layout)
 
@@ -213,6 +217,8 @@ class MainWindow(QMainWindow):
 
         detail_card = QFrame()
         detail_card.setObjectName("card")
+        detail_card.setMinimumHeight(230)
+
         detail_layout = QVBoxLayout()
         detail_layout.setSpacing(8)
         detail_card.setLayout(detail_layout)
@@ -234,10 +240,11 @@ class MainWindow(QMainWindow):
         detail_layout.addWidget(self.detail_today)
         detail_layout.addWidget(self.detail_description)
 
-        right_panel.addWidget(stats_card)
-        right_panel.addWidget(detail_card)
-        right_panel.addWidget(tip_card)
-        right_panel.addStretch()
+        # 右侧三张卡片按比例铺满整列
+        # 打卡统计较短，任务详情和今日提醒更长
+        right_panel.addWidget(stats_card, 5)
+        right_panel.addWidget(detail_card, 7)
+        right_panel.addWidget(tip_card, 2)
 
         main_layout.addLayout(left_panel, 3)
         main_layout.addLayout(right_panel, 1)
