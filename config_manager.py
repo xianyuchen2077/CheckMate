@@ -1,21 +1,11 @@
 import json
-import sys
-from pathlib import Path
+import shutil
+
+from data_guard.paths import get_app_dir, get_user_data_root_dir
 
 
-def get_app_dir():
-    """
-    获取配置文件保存目录。
-    开发环境：项目根目录
-    打包环境：exe 所在目录
-    """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-
-    return Path(__file__).resolve().parent
-
-
-CONFIG_PATH = get_app_dir() / "config.json"
+CONFIG_PATH = get_user_data_root_dir() / "config.json"
+LEGACY_CONFIG_PATH = get_app_dir() / "config.json"
 
 
 DEFAULT_CONFIG = {
@@ -29,11 +19,31 @@ DEFAULT_CONFIG = {
 }
 
 
+def migrate_legacy_config_if_needed():
+    """
+    如果 AppData 中还没有 config.json，
+    但旧项目目录下存在 config.json，
+    则复制旧配置到 AppData。
+    """
+    if CONFIG_PATH.exists():
+        return False
+
+    if not LEGACY_CONFIG_PATH.exists():
+        return False
+
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(LEGACY_CONFIG_PATH, CONFIG_PATH)
+
+    return True
+
+
 def load_config():
     """
     读取配置文件。
     如果配置文件不存在，就返回默认配置。
     """
+    migrate_legacy_config_if_needed()
+
     if not CONFIG_PATH.exists():
         return DEFAULT_CONFIG.copy()
 
