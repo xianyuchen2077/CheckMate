@@ -332,7 +332,8 @@ class MainWindow(QMainWindow):
             self.tray_manager.show_message(
                 "CheckMate 仍在运行",
                 "我已经缩到系统托盘啦，到点还会提醒你，不要成为咸鱼。",
-                3000
+                3000,
+                icon_type="default"
             )
 
     def load_tasks(self):
@@ -623,7 +624,8 @@ class MainWindow(QMainWindow):
             self.tray_manager.show_message(
                 "CheckMate",
                 f"本次已完成：{title}",
-                3000
+                3000,
+                icon_type="done"
             )
 
         if growth_result is not None:

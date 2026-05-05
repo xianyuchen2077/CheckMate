@@ -753,16 +753,6 @@ def save_pet_status(
         total_tasks_done
     ))
 
-    print("[database.save_pet_status] rowcount =", cursor.rowcount)
-    print(
-        "[database.save_pet_status] saved:",
-        "level =", level,
-        "exp =", exp,
-        "stage =", stage,
-        "mood =", mood,
-        "total_tasks_done =", total_tasks_done
-    )
-
     conn.commit()
     conn.close()
 

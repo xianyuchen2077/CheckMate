@@ -134,7 +134,8 @@ class ReminderManager:
             self.tray_manager.show_message(
                 "CheckMate 提醒",
                 f"{title} 的打卡时间到了：{remind_time}",
-                5000
+                5000,
+                icon_type="reminder"
             )
 
     def handle_done(self, task_id, title, remind_time=None, repeat_interval_minutes=None):
@@ -176,7 +177,8 @@ class ReminderManager:
                 self.tray_manager.show_message(
                     "CheckMate",
                     f"本次已完成，稍后还会继续提醒：{title}",
-                    3000
+                    3000,
+                    icon_type="done"
                 )
 
             if growth_result is not None:
@@ -349,7 +351,8 @@ class ReminderManager:
             self.tray_manager.show_message(
                 "CheckMate",
                 f"好，{display_time} 再提醒你：{title}",
-                3000
+                3000,
+                icon_type="snooze"
             )
 
         timer = QTimer(self.main_window)
@@ -469,7 +472,8 @@ class ReminderManager:
             self.tray_manager.show_message(
                 "CheckMate",
                 f"{repeat_interval_minutes} 分钟后会再次提醒：{title}",
-                3000
+                3000,
+                icon_type="reminder"
             )
 
         timer = QTimer(self.main_window)
@@ -551,7 +555,8 @@ class ReminderManager:
             self.tray_manager.show_message(
                 "CheckMate",
                 f"今天不再提醒：{title}",
-                3000
+                3000,
+                icon_type="warning"
             )
 
     def cancel_task_timers(self, task_id):
