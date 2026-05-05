@@ -1,7 +1,8 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTime, Qt
+from PySide6.QtCore import QTime, Qt, Signal, QRectF
+from PySide6.QtGui import QPainter, QColor, QPen
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -57,6 +58,72 @@ def get_add_task_background_path():
 
     return None
 
+class ToggleSwitch(QWidget):
+    toggled = Signal(bool)
+
+    def __init__(self, checked=False, parent=None):
+        super().__init__(parent)
+        self._checked = checked
+        self.setFixedSize(64, 36)
+
+    def isChecked(self):
+        return self._checked
+
+    def setChecked(self, checked):
+        checked = bool(checked)
+        if self._checked == checked:
+            return
+        self._checked = checked
+        self.update()
+        self.toggled.emit(self._checked)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setChecked(not self._checked)
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+
+        # 背景轨道
+        track_rect = QRectF(2, 2, w - 4, h - 4)
+        radius = track_rect.height() / 2
+
+        if self._checked:
+            track_color = QColor("#10c95b")   # 绿色
+        else:
+            track_color = QColor("#d1d5db")   # 灰色
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(track_color)
+        painter.drawRoundedRect(track_rect, radius, radius)
+
+        # 滑块
+        margin = 5
+        thumb_diameter = h - margin * 2
+
+        if self._checked:
+            thumb_x = w - thumb_diameter - margin
+        else:
+            thumb_x = margin
+
+        thumb_rect = QRectF(
+            thumb_x,
+            margin,
+            thumb_diameter,
+            thumb_diameter
+        )
+
+        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(QPen(QColor("#e5e7eb"), 1))
+        painter.drawEllipse(thumb_rect)
+
+        painter.end()
+
 class AddTaskDialog(QDialog):
     def __init__(
         self,
@@ -74,32 +141,31 @@ class AddTaskDialog(QDialog):
         self.setWindowTitle("添加任务" if not title else "编辑任务")
         # 固定尺寸，避免拖动或重绘时布局变形
         # 当前比例约为 1240:693
-        self.setFixedSize(805, 450)
-        self.setMinimumSize(805, 450)
-        self.setMaximumSize(805, 450)
+        self.setFixedSize(985, 550)
+        self.setMinimumSize(985, 550)
+        self.setMaximumSize(985, 550)
 
         self.type_left_label = QLabel("任务")
         self.type_left_label.setObjectName("typeSwitchLabel")
 
-        self.task_type_switch = QCheckBox()
-        self.task_type_switch.setObjectName("taskTypeSwitch")
+        self.task_type_switch = ToggleSwitch(
+            checked=(self.task_type == "habit")
+        )
 
         self.type_right_label = QLabel("习惯")
         self.type_right_label.setObjectName("typeSwitchLabel")
 
-        # 约定：
-        # 未选中 = task 一次性任务
-        # 选中 = habit 长期习惯
-        self.task_type_switch.setChecked(self.task_type == "habit")
-
-        self.task_type_switch.stateChanged.connect(self.on_task_type_changed)
+        self.task_type_switch.toggled.connect(self.on_task_type_changed)
+        self.task_type_switch.toggled.connect(self.update_task_type_label_style)
 
         type_switch_layout = QHBoxLayout()
-        type_switch_layout.setSpacing(6)
+        type_switch_layout.setContentsMargins(0, 0, 0, 0)
+        type_switch_layout.setSpacing(8)
         type_switch_layout.addWidget(self.type_left_label)
         type_switch_layout.addWidget(self.task_type_switch)
         type_switch_layout.addWidget(self.type_right_label)
-        type_switch_layout.addStretch()
+
+        self.update_task_type_label_style()
 
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("例如：背英语单词 30 个")
@@ -182,7 +248,7 @@ class AddTaskDialog(QDialog):
         name_label = self.create_form_label("任务名称：", offset_y=0)
         description_label = self.create_form_label("备注说明：", offset_y=12)
         time_label = self.create_form_label("提醒时间：", offset_y=4)
-        repeat_label = self.create_form_label("重复提醒：", offset_y=54)
+        repeat_label = self.create_form_label("重复提醒：", offset_y=80)
 
         form_layout.addRow(name_label, self.title_edit)
         form_layout.addRow(description_label, self.description_edit)
@@ -205,7 +271,9 @@ class AddTaskDialog(QDialog):
         main_layout.setContentsMargins(22, 20, 22, 18)
         main_layout.setSpacing(12)
 
+        # “任务/习惯” 类型切换放在顶部
         top_layout = QHBoxLayout()
+        top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.addStretch()
         top_layout.addLayout(type_switch_layout)
 
@@ -222,25 +290,6 @@ class AddTaskDialog(QDialog):
         self.setLayout(outer_layout)
         self.setStyleSheet(get_add_task_dialog_style(get_add_task_background_path()))
 
-        base_style = get_add_task_dialog_style(get_add_task_background_path())
-        self.setStyleSheet(base_style + """
-            #typeSwitchLabel {
-                color: #111827;
-                font-size: 13px;
-                font-weight: 700;
-                background-color: transparent;
-            }
-
-            #taskTypeSwitch {
-                spacing: 6px;
-                background-color: transparent;
-            }
-
-            #taskTypeSwitch::indicator {
-                width: 46px;
-                height: 24px;
-            }
-        """)
 
     def create_form_label(self, text, offset_y=0):
         """
@@ -295,13 +344,42 @@ class AddTaskDialog(QDialog):
 
         return title, remind_time, description, repeat_interval_minutes, task_type
 
-    def on_task_type_changed(self):
+    def on_task_type_changed(self, checked):
         """
-        切换任务类型。
-        未选中：任务 task
-        选中：习惯 habit
+        未选中：task
+        选中：habit
         """
-        if self.task_type_switch.isChecked():
+        if checked:
             self.task_type = "habit"
         else:
             self.task_type = "task"
+
+    def update_task_type_label_style(self, checked=None):
+        """
+        根据当前任务类型，更新“任务 / 习惯”文字高亮。
+
+        不在这里写具体颜色和字体。
+        具体样式统一放在 styles.py：
+            #typeSwitchLabelActive
+            #typeSwitchLabelInactive
+        """
+        if not hasattr(self, "task_type_switch"):
+            return
+
+        if self.task_type_switch.isChecked():
+            # 当前是“习惯”
+            self.type_left_label.setObjectName("typeSwitchLabelInactive")
+            self.type_right_label.setObjectName("typeSwitchLabelActive")
+        else:
+            # 当前是“任务”
+            self.type_left_label.setObjectName("typeSwitchLabelActive")
+            self.type_right_label.setObjectName("typeSwitchLabelInactive")
+
+        # objectName 改变后，需要重新刷新样式
+        self.type_left_label.style().unpolish(self.type_left_label)
+        self.type_left_label.style().polish(self.type_left_label)
+        self.type_left_label.update()
+
+        self.type_right_label.style().unpolish(self.type_right_label)
+        self.type_right_label.style().polish(self.type_right_label)
+        self.type_right_label.update()

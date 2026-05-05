@@ -185,6 +185,27 @@ def get_add_task_dialog_style(background_path=None):
             font-weight: 600;
         }}
 
+        #typeSwitchLabel {{
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: 700;
+            background-color: transparent;
+        }}
+
+        #typeSwitchLabelActive {{
+            color: #ef4444;
+            font-size: 14px;
+            font-weight: 800;
+            background-color: transparent;
+        }}
+
+        #typeSwitchLabelInactive {{
+            color: rgba(255, 255, 255, 150);
+            font-size: 14px;
+            font-weight: 700;
+            background-color: transparent;
+        }}
+
         QCheckBox {{
             color: #ffffff;
             background-color: transparent;
