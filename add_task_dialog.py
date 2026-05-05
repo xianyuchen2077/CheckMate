@@ -64,9 +64,12 @@ class AddTaskDialog(QDialog):
         title="",
         remind_time=None,
         description="",
-        repeat_interval_minutes=None
+        repeat_interval_minutes=None,
+        task_type="habit"
     ):
         super().__init__(parent)
+
+        self.task_type = task_type or "habit"
 
         self.setWindowTitle("添加任务" if not title else "编辑任务")
         # 固定尺寸，避免拖动或重绘时布局变形
@@ -74,6 +77,29 @@ class AddTaskDialog(QDialog):
         self.setFixedSize(805, 450)
         self.setMinimumSize(805, 450)
         self.setMaximumSize(805, 450)
+
+        self.type_left_label = QLabel("任务")
+        self.type_left_label.setObjectName("typeSwitchLabel")
+
+        self.task_type_switch = QCheckBox()
+        self.task_type_switch.setObjectName("taskTypeSwitch")
+
+        self.type_right_label = QLabel("习惯")
+        self.type_right_label.setObjectName("typeSwitchLabel")
+
+        # 约定：
+        # 未选中 = task 一次性任务
+        # 选中 = habit 长期习惯
+        self.task_type_switch.setChecked(self.task_type == "habit")
+
+        self.task_type_switch.stateChanged.connect(self.on_task_type_changed)
+
+        type_switch_layout = QHBoxLayout()
+        type_switch_layout.setSpacing(6)
+        type_switch_layout.addWidget(self.type_left_label)
+        type_switch_layout.addWidget(self.task_type_switch)
+        type_switch_layout.addWidget(self.type_right_label)
+        type_switch_layout.addStretch()
 
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("例如：背英语单词 30 个")
@@ -178,6 +204,12 @@ class AddTaskDialog(QDialog):
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(22, 20, 22, 18)
         main_layout.setSpacing(12)
+
+        top_layout = QHBoxLayout()
+        top_layout.addStretch()
+        top_layout.addLayout(type_switch_layout)
+
+        main_layout.addLayout(top_layout)
         main_layout.addLayout(form_layout)
         main_layout.addWidget(self.button_box)
 
@@ -189,6 +221,26 @@ class AddTaskDialog(QDialog):
 
         self.setLayout(outer_layout)
         self.setStyleSheet(get_add_task_dialog_style(get_add_task_background_path()))
+
+        base_style = get_add_task_dialog_style(get_add_task_background_path())
+        self.setStyleSheet(base_style + """
+            #typeSwitchLabel {
+                color: #111827;
+                font-size: 13px;
+                font-weight: 700;
+                background-color: transparent;
+            }
+
+            #taskTypeSwitch {
+                spacing: 6px;
+                background-color: transparent;
+            }
+
+            #taskTypeSwitch::indicator {
+                width: 46px;
+                height: 24px;
+            }
+        """)
 
     def create_form_label(self, text, offset_y=0):
         """
@@ -239,4 +291,17 @@ class AddTaskDialog(QDialog):
 
         repeat_interval_minutes = self.repeat_widget.get_repeat_interval_minutes()
 
-        return title, remind_time, description, repeat_interval_minutes
+        task_type = "habit" if self.task_type_switch.isChecked() else "task"
+
+        return title, remind_time, description, repeat_interval_minutes, task_type
+
+    def on_task_type_changed(self):
+        """
+        切换任务类型。
+        未选中：任务 task
+        选中：习惯 habit
+        """
+        if self.task_type_switch.isChecked():
+            self.task_type = "habit"
+        else:
+            self.task_type = "task"
