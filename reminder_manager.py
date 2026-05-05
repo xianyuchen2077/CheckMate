@@ -19,6 +19,14 @@ class ReminderManager:
         self.timer = QTimer(self.main_window)
         self.timer.timeout.connect(self.check_reminders)
 
+        # 保存重复提醒任务的下一轮计时器
+        self.repeat_timers = {}
+        # 保存稍后提醒的计时器
+        self.snooze_timers = {}
+        # 保存运行时下一次真实提醒时间
+        # task_id -> datetime
+        self.next_remind_times = {}
+
     def start(self):
         """
         启动提醒检查定时器。
@@ -104,6 +112,13 @@ class ReminderManager:
             repeat_interval_minutes
         )
 
+    def refresh_main_window_tasks(self):
+        """
+        提醒时间变化后，刷新主窗口任务列表和详情。
+        """
+        if self.main_window is not None and hasattr(self.main_window, "load_tasks"):
+            self.main_window.load_tasks()
+
     def notify_pet_reminding(self, title):
         """
         通知桌面宠物进入提醒状态。
@@ -133,7 +148,11 @@ class ReminderManager:
             每次点击完成都算完成本次。
             之后继续按 repeat_interval_minutes 安排下一次提醒。
         """
-        is_repeat_task = repeat_interval_minutes is not None
+        is_repeat_task = repeat_interval_minutes is not None and repeat_interval_minutes > 0
+
+        # 关键：完成当前这轮前，先取消该任务残留的 timer
+        # 避免稍后提醒链和重复提醒链同时存在。
+        self.cancel_task_timers(task_id)
 
         if is_repeat_task:
             task = database.get_task_by_id(task_id)
@@ -210,6 +229,7 @@ class ReminderManager:
         作用：
             1. 允许编辑后的任务重新进入提醒逻辑
             2. 清理 repeat_timer_keys，避免旧状态挡住新状态
+            3. 取消该任务已经安排的重复提醒 / 稍后提醒计时器
         """
         today = database.get_today_string()
 
@@ -219,6 +239,23 @@ class ReminderManager:
         }
 
         self.repeat_timer_keys.discard(f"{today}-{task_id}")
+
+        self.cancel_task_timers(task_id)
+
+    def set_next_remind_time(self, task_id, next_time):
+        """
+        记录某个任务下一次真实提醒时间，并刷新 UI。
+        """
+        self.next_remind_times[task_id] = next_time
+        self.refresh_main_window_tasks()
+
+    def clear_next_remind_time(self, task_id):
+        """
+        清除某个任务的运行时下一次提醒时间。
+        """
+        if task_id in self.next_remind_times:
+            self.next_remind_times.pop(task_id, None)
+            self.refresh_main_window_tasks()
 
     def show_pet_growth_dialog(self, growth_result):
         """
@@ -286,12 +323,25 @@ class ReminderManager:
     ):
         """
         安排下一次稍后提醒。
+
+        关键规则：
+            对重复提醒任务来说，稍后提醒会接管当前提醒链。
+            因此需要取消该任务已有的重复提醒 timer 和稍后提醒 timer。
+
+        效果：
+            重复任务 09:00 提醒，间隔 1h。
+            如果选择 09:30 稍后提醒，则下一次提醒是 09:30。
+            09:30 完成后，再从 09:30 开始按 1h 安排下一轮。
         """
         now = datetime.now()
         delay_ms = int((snooze_until - now).total_seconds() * 1000)
 
         if delay_ms < 1000:
             delay_ms = 1000
+
+        # 关键：稍后提醒会接管这条任务提醒链
+        # 所以必须取消旧的 repeat timer 和旧的 snooze timer
+        self.cancel_task_timers(task_id)
 
         display_time = snooze_until.strftime("%H:%M")
 
@@ -302,14 +352,65 @@ class ReminderManager:
                 3000
             )
 
-        QTimer.singleShot(
-            delay_ms,
-            lambda: self.show_reminder(
+        timer = QTimer(self.main_window)
+        timer.setSingleShot(True)
+
+        timer.timeout.connect(
+            lambda: self.handle_snooze_timeout(
                 task_id,
                 title,
                 remind_time,
                 repeat_interval_minutes
             )
+        )
+
+        self.snooze_timers[task_id] = timer
+        timer.start(delay_ms)
+
+        self.set_next_remind_time(task_id, snooze_until)
+
+    def handle_snooze_timeout(
+        self,
+        task_id,
+        title,
+        remind_time,
+        repeat_interval_minutes=None
+    ):
+        """
+        稍后提醒时间到。
+
+        注意：
+            这里只负责再次弹出提醒。
+            不在这里安排重复提醒下一轮。
+
+            如果用户点击完成，
+            handle_done() 会在完成后安排下一轮重复提醒。
+        """
+        self.snooze_timers.pop(task_id, None)
+        self.next_remind_times.pop(task_id, None)
+
+        today = database.get_today_string()
+        skip_today_key = f"{today}-{task_id}"
+
+        if skip_today_key in self.skip_today_keys:
+            return
+
+        if not database.is_task_active(task_id):
+            return
+
+        task = database.get_task_by_id(task_id)
+        if task is None:
+            return
+
+        latest_title = task["title"]
+        latest_remind_time = task["remind_time"]
+        latest_repeat_interval_minutes = task["repeat_interval_minutes"]
+
+        self.show_reminder(
+            task_id,
+            latest_title,
+            latest_remind_time,
+            latest_repeat_interval_minutes
         )
 
     def schedule_repeat_if_needed(
@@ -322,13 +423,14 @@ class ReminderManager:
         """
         安排下一次重复提醒。
 
-        重复任务即使点击了“完成打卡”，也会继续安排下一次。
+        规则：
+            同一个 task_id 同一时间只能存在一个重复提醒 timer。
 
         停止条件：
             1. 今天不再提醒
             2. 任务被暂停
             3. repeat_interval_minutes 为空
-            4. 当前任务已经有一个重复提醒定时器在等待
+            4. repeat_interval_minutes <= 0
         """
         if repeat_interval_minutes is None:
             return
@@ -352,13 +454,16 @@ class ReminderManager:
 
         repeat_timer_key = f"{today}-{task_id}"
 
-        # 防止同一个周期任务被重复安排多个定时器
-        if repeat_timer_key in self.repeat_timer_keys:
-            return
+        # 安排新的重复提醒前，先取消这个任务旧的重复提醒 timer
+        old_timer = self.repeat_timers.pop(task_id, None)
+        if old_timer is not None:
+            old_timer.stop()
+            old_timer.deleteLater()
 
-        self.repeat_timer_keys.add(repeat_timer_key)
+        self.repeat_timer_keys.discard(repeat_timer_key)
 
         delay_ms = repeat_interval_minutes * 60 * 1000
+        next_time = datetime.now() + timedelta(minutes=repeat_interval_minutes)
 
         if self.tray_manager is not None:
             self.tray_manager.show_message(
@@ -367,8 +472,10 @@ class ReminderManager:
                 3000
             )
 
-        QTimer.singleShot(
-            delay_ms,
+        timer = QTimer(self.main_window)
+        timer.setSingleShot(True)
+
+        timer.timeout.connect(
             lambda: self.handle_repeat_timeout(
                 task_id,
                 title,
@@ -377,6 +484,13 @@ class ReminderManager:
                 repeat_timer_key
             )
         )
+
+        self.repeat_timers[task_id] = timer
+        self.repeat_timer_keys.add(repeat_timer_key)
+
+        timer.start(delay_ms)
+
+        self.set_next_remind_time(task_id, next_time)
 
     def handle_repeat_timeout(
         self,
@@ -390,6 +504,8 @@ class ReminderManager:
         重复提醒时间到。
         """
         self.repeat_timer_keys.discard(repeat_timer_key)
+        self.repeat_timers.pop(task_id, None)
+        self.next_remind_times.pop(task_id, None)
 
         today = database.get_today_string()
         skip_today_key = f"{today}-{task_id}"
@@ -422,6 +538,8 @@ class ReminderManager:
         """
         今天不再提醒这个任务。
         """
+        self.cancel_task_timers(task_id)
+
         today = database.get_today_string()
         skip_today_key = f"{today}-{task_id}"
         self.skip_today_keys.add(skip_today_key)
@@ -435,3 +553,30 @@ class ReminderManager:
                 f"今天不再提醒：{title}",
                 3000
             )
+
+    def cancel_task_timers(self, task_id):
+        """
+        取消某个任务当前所有已安排的提醒计时器。
+
+        用于避免：
+            重复提醒链
+            稍后提醒链
+            同时存在，导致提醒分叉。
+        """
+        repeat_timer = self.repeat_timers.pop(task_id, None)
+
+        if repeat_timer is not None:
+            repeat_timer.stop()
+            repeat_timer.deleteLater()
+
+        snooze_timer = self.snooze_timers.pop(task_id, None)
+
+        if snooze_timer is not None:
+            snooze_timer.stop()
+            snooze_timer.deleteLater()
+
+        today = database.get_today_string()
+        self.repeat_timer_keys.discard(f"{today}-{task_id}")
+
+        self.next_remind_times.pop(task_id, None)
+        self.refresh_main_window_tasks()

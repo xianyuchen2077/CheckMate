@@ -357,19 +357,27 @@ class MainWindow(QMainWindow):
 
             type_icon = "📝" if task_type == "task" else "🌱"
 
+            next_remind_time = self.get_runtime_next_remind_time_text(task_id)
+
             if repeat_interval_minutes:
                 repeat_text = self.format_repeat_interval(repeat_interval_minutes)
 
-                if remind_time:
+                if next_remind_time:
+                    display_text = (
+                        f"{status_icon} {type_icon} {title}    "
+                        f"⏭ 下次 {next_remind_time}    "
+                    )
+                elif remind_time:
                     display_text = (
                         f"{status_icon} {type_icon} {title}    "
                         f"⏰ {remind_time}    "
-                        f"{repeat_text}"
                     )
                 else:
                     display_text = f"{status_icon} {type_icon} {title}    {repeat_text}"
             else:
-                if remind_time:
+                if next_remind_time:
+                    display_text = f"{status_icon} {type_icon} {title}    ⏭ 下次 {next_remind_time}"
+                elif remind_time:
                     display_text = f"{status_icon} {type_icon} {title}    ⏰ {remind_time}"
                 else:
                     display_text = f"{status_icon} {type_icon} {title}"
@@ -421,6 +429,7 @@ class MainWindow(QMainWindow):
         remind_time = task["remind_time"] or "未设置"
         description = task["description"] or "暂无备注"
         repeat_interval_minutes = task["repeat_interval_minutes"]
+        next_remind_time = self.get_runtime_next_remind_time_text(task_id)
         task_type = task["task_type"]
 
         if repeat_interval_minutes:
@@ -433,7 +442,14 @@ class MainWindow(QMainWindow):
         type_text = "任务" if task_type == "task" else "习惯"
 
         self.detail_name.setText(f"任务名称：{title}（{type_text}）")
-        self.detail_time.setText(f"提醒时间：{remind_time} / 重复：{repeat_text}")
+        if next_remind_time:
+            self.detail_time.setText(
+                f"提醒时间：{remind_time} / 下次提醒：{next_remind_time} / 重复：{repeat_text}"
+            )
+        else:
+            self.detail_time.setText(
+                f"提醒时间：{remind_time} / 重复：{repeat_text}"
+            )
         self.detail_active.setText(f"任务状态：{active_text}")
         self.detail_today.setText(f"今日状态：{today_text}")
         self.detail_description.setText(f"备注说明：{description}")
@@ -765,3 +781,25 @@ class MainWindow(QMainWindow):
             return f"每隔 {hours} 小时"
 
         return f"每隔 {hours} 小时 {minutes} 分钟"
+
+    def get_runtime_next_remind_time_text(self, task_id):
+        """
+        获取运行时下一次提醒时间文本。
+
+        如果 ReminderManager 中记录了下一次真实提醒时间，
+        则返回 HH:mm。
+        """
+        if not hasattr(self, "reminder_manager"):
+            return None
+
+        if self.reminder_manager is None:
+            return None
+
+        next_remind_times = getattr(self.reminder_manager, "next_remind_times", {})
+
+        next_time = next_remind_times.get(task_id)
+
+        if next_time is None:
+            return None
+
+        return next_time.strftime("%H:%M")
