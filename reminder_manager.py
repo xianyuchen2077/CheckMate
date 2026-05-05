@@ -158,6 +158,9 @@ class ReminderManager:
         if is_repeat_task:
             task = database.get_task_by_id(task_id)
 
+            # 记录今天至少完成过一次
+            database.mark_task_done_today(task_id)
+
             growth_result = None
             if task is not None:
                 growth_result = pet_growth.add_exp_for_completed_task(task)
@@ -585,3 +588,32 @@ class ReminderManager:
 
         self.next_remind_times.pop(task_id, None)
         self.refresh_main_window_tasks()
+
+    def reset_daily_state(self):
+        """
+        跨天后清理提醒管理器的当天状态。
+
+        需要清理：
+            reminded_keys
+            skip_today_keys
+            repeat_timer_keys
+            repeat_timers
+            snooze_timers
+            next_remind_times
+        """
+        self.reminded_keys.clear()
+        self.skip_today_keys.clear()
+        self.repeat_timer_keys.clear()
+
+        for timer in self.repeat_timers.values():
+            timer.stop()
+            timer.deleteLater()
+        self.repeat_timers.clear()
+
+        for timer in self.snooze_timers.values():
+            timer.stop()
+            timer.deleteLater()
+        self.snooze_timers.clear()
+
+        if hasattr(self, "next_remind_times"):
+            self.next_remind_times.clear()

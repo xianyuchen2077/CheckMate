@@ -68,9 +68,15 @@ class MainWindow(QMainWindow):
 
         database.init_db()
 
-        archived_count = database.archive_expired_one_day_tasks()
-        if archived_count > 0:
-            log_info(f"已归档过期一次性任务：{archived_count} 个")
+        refresh_result = database.refresh_tasks_for_today()
+
+        if refresh_result["total_changed"] > 0:
+            log_info(
+                "每日任务刷新："
+                f"习惯更新 {refresh_result['habit_updated']} 个，"
+                f"任务归档 {refresh_result['task_archived']} 个，"
+                f"任务顺延 {refresh_result['task_rolled']} 个"
+            )
 
         self.data_guard_result = run_startup_data_guard()
 
@@ -92,6 +98,12 @@ class MainWindow(QMainWindow):
         self.reminder_manager.start()
 
         QTimer.singleShot(0, self.show_data_guard_warning_if_needed)
+
+        self.current_task_date = database.get_today_string()
+
+        self.daily_refresh_timer = QTimer(self)
+        self.daily_refresh_timer.timeout.connect(self.check_daily_refresh)
+        self.daily_refresh_timer.start(60 * 1000)
 
         icon_path = get_icon_path()
         if icon_path:
@@ -425,6 +437,10 @@ class MainWindow(QMainWindow):
             self.detail_today.setText("今日状态：-")
             self.detail_description.setText("备注说明：-")
             return
+
+        # 记录“今天这个重复任务至少完成过一次”
+        # 即使重复任务一天完成多轮，checkins 表里也只需要有一条当天记录
+        database.mark_task_done_today(task_id)
 
         title = task["title"]
         remind_time = task["remind_time"] or "未设置"
@@ -826,3 +842,37 @@ class MainWindow(QMainWindow):
             return None
 
         return next_time.strftime("%H:%M")
+
+    def check_daily_refresh(self):
+        """
+        程序运行中跨过 00:00 后，自动刷新任务日期。
+        """
+        today = database.get_today_string()
+
+        if today == self.current_task_date:
+            return
+
+        self.current_task_date = today
+        self.refresh_tasks_for_new_day()
+
+    def refresh_tasks_for_new_day(self):
+        """
+        执行每日任务刷新，并同步 UI 与提醒状态。
+        """
+        refresh_result = database.refresh_tasks_for_today()
+
+        if refresh_result["total_changed"] > 0:
+            log_info(
+                "每日任务刷新："
+                f"习惯更新 {refresh_result['habit_updated']} 个，"
+                f"任务归档 {refresh_result['task_archived']} 个，"
+                f"任务顺延 {refresh_result['task_rolled']} 个"
+            )
+
+        if hasattr(self, "reminder_manager") and self.reminder_manager is not None:
+            self.reminder_manager.reset_daily_state()
+
+        self.load_tasks()
+
+        if hasattr(self, "pet_window"):
+            self.pet_window.refresh_growth_info()

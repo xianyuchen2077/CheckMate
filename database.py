@@ -92,6 +92,19 @@ def init_db():
             ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0
         """)
 
+    if "task_date" not in columns:
+        cursor.execute("""
+            ALTER TABLE tasks
+            ADD COLUMN task_date TEXT
+        """)
+
+        cursor.execute("""
+            UPDATE tasks
+            SET task_date = substr(created_at, 1, 10)
+            WHERE task_date IS NULL
+            OR task_date = ''
+        """)
+
     # 打卡记录表：保存每天的完成记录
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS checkins (
@@ -200,7 +213,7 @@ def get_all_tasks_with_today_status():
                 tasks.task_type = 'habit'
                 OR (
                     tasks.task_type = 'task'
-                    AND substr(tasks.created_at, 1, 10) = ?
+                    AND tasks.task_date = ?
                 )
           )
         ORDER BY tasks.id DESC
@@ -219,6 +232,8 @@ def add_task(
     repeat_interval_minutes=None,
     task_type="habit"
 ):
+    today = get_today_string()
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -229,15 +244,17 @@ def add_task(
             description,
             repeat_interval_minutes,
             task_type,
-            is_archived
+            is_archived,
+            task_date
         )
-        VALUES (?, ?, ?, ?, ?, 0)
+        VALUES (?, ?, ?, ?, ?, 0, ?)
     """, (
         title,
         remind_time,
         description,
         repeat_interval_minutes,
-        task_type
+        task_type,
+        today
     ))
 
     conn.commit()
@@ -258,6 +275,7 @@ def get_task_by_id(task_id):
             repeat_interval_minutes,
             task_type,
             is_archived,
+            task_date,
             created_at,
             is_active
         FROM tasks
@@ -277,6 +295,8 @@ def update_task(
     repeat_interval_minutes=None,
     task_type="habit"
 ):
+    today = get_today_string()
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -290,9 +310,9 @@ def update_task(
 
     old_task_type = old_task["task_type"] if old_task else None
 
-    # 如果从“习惯”切换为“一次性任务”，需要把 created_at 更新为当前时间。
-    # 否则旧习惯可能因为 created_at 不是今天，被今日任务列表过滤掉，看起来像“消失”。
-    if old_task_type != "task" and task_type == "task":
+    # 类型发生变化时，重置 task_date 为今天
+    # 尤其是 habit -> task，否则 task 可能因为 task_date 不是今天而从今日列表消失
+    if old_task_type != task_type:
         cursor.execute("""
             UPDATE tasks
             SET title = ?,
@@ -300,7 +320,7 @@ def update_task(
                 description = ?,
                 repeat_interval_minutes = ?,
                 task_type = ?,
-                created_at = CURRENT_TIMESTAMP,
+                task_date = ?,
                 is_archived = 0
             WHERE id = ?
         """, (
@@ -309,6 +329,7 @@ def update_task(
             description,
             repeat_interval_minutes,
             task_type,
+            today,
             task_id
         ))
     else:
@@ -406,7 +427,7 @@ def get_today_stats():
                 task_type = 'habit'
                 OR (
                     task_type = 'task'
-                    AND substr(created_at, 1, 10) = ?
+                    AND task_date = ?
                 )
           )
     """, (today,))
@@ -423,7 +444,7 @@ def get_today_stats():
                 tasks.task_type = 'habit'
                 OR (
                     tasks.task_type = 'task'
-                    AND substr(tasks.created_at, 1, 10) = ?
+                    AND tasks.task_date = ?
                 )
           )
     """, (today, today))
@@ -506,11 +527,7 @@ def get_due_tasks_now():
         每天保留并提醒。
 
     task：
-        只在创建当天提醒。
-        第二天归档后不再提醒。
-
-    重复提醒任务：
-        不受今日 checkins 限制。
+        只有 task_date = 今天时才提醒。
     """
     now_time = datetime.now().strftime("%H:%M")
     today = get_today_string()
@@ -524,7 +541,8 @@ def get_due_tasks_now():
             tasks.title,
             tasks.remind_time,
             tasks.repeat_interval_minutes,
-            tasks.task_type
+            tasks.task_type,
+            tasks.task_date
         FROM tasks
         LEFT JOIN checkins
             ON tasks.id = checkins.task_id
@@ -538,7 +556,7 @@ def get_due_tasks_now():
                 tasks.task_type = 'habit'
                 OR (
                     tasks.task_type = 'task'
-                    AND substr(tasks.created_at, 1, 10) = ?
+                    AND tasks.task_date = ?
                 )
           )
           AND (
@@ -570,17 +588,24 @@ def toggle_task_active(task_id):
 
     refresh_integrity_after_db_change()
 
+
 def get_history_records(days=7):
     """
     获取最近 days 天的打卡历史。
 
-    显示规则：
+    历史记录规则：
+        不按 task_type / is_archived / is_active 做显示过滤。
+        只判断任务在某一天是否“存在过”。
+
+    存在区间：
         habit：
-            从创建日期开始，每一天都显示。
+            created_date <= date_str <= 今天
 
         task：
-            只在创建当天显示。
-            即使第二天被归档，也仍然能在创建当天的历史记录里看到。
+            created_date <= date_str <= task_date
+
+    done：
+        由 checkins 中是否存在该日期记录决定。
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -591,8 +616,10 @@ def get_history_records(days=7):
             title,
             description,
             created_at,
+            task_date,
             task_type,
-            is_archived
+            is_archived,
+            is_active
         FROM tasks
         ORDER BY id ASC
     """)
@@ -600,6 +627,7 @@ def get_history_records(days=7):
 
     history = []
     today = date.today()
+    today_str = today.isoformat()
 
     for offset in range(days):
         current_date = today - timedelta(days=offset)
@@ -612,15 +640,22 @@ def get_history_records(days=7):
             created_date = created_at[:10] if created_at else date_str
 
             task_type = task["task_type"] or "habit"
+            task_date = task["task_date"] or created_date
 
-            # 如果任务是在 current_date 之后创建的，
-            # 那么这一天不显示这个任务
-            if created_date > date_str:
+            # 任务创建之前，不存在
+            if date_str < created_date:
                 continue
 
-            # 一次性任务只在创建当天显示到历史记录里
-            # 即使它已经被归档，也仍然保留创建当天的历史展示
-            if task_type == "task" and created_date != date_str:
+            # habit：从创建日起一直存在到今天
+            if task_type == "habit":
+                end_date = today_str
+
+            # task：从创建日起存在到当前/最终 task_date
+            else:
+                end_date = task_date
+
+            # 超出存在区间，不显示
+            if date_str > end_date:
                 continue
 
             cursor.execute("""
@@ -638,6 +673,7 @@ def get_history_records(days=7):
                 "done": checkin is not None,
                 "task_type": task_type,
                 "is_archived": task["is_archived"],
+                "is_active": task["is_active"],
             })
 
         history.append({
@@ -839,38 +875,104 @@ def is_task_active(task_id):
 
     return row["is_active"] == 1
 
-def archive_expired_one_day_tasks():
+
+def refresh_tasks_for_today():
     """
-    归档过期的一次性任务。
+    每日刷新任务归属日期。
 
     规则：
-        task_type = 'task' 的任务只在创建当天显示。
-        第二天启动程序时，将其 is_archived 设为 1。
+        habit：
+            每天继续保留，task_date 更新为今天。
 
-    注意：
-        不删除 tasks 记录。
-        不删除 checkins 记录。
-        这样历史记录仍然可以看到昨天完成过的一次性任务。
+        task + is_active = 0：
+            暂停中的一次性任务，不管是否完成，都顺延到今天。
+
+        task + is_active = 1 + 当前 task_date 已完成：
+            归档，不再进入今日任务。
+
+        task + is_active = 1 + 当前 task_date 未完成：
+            顺延到今天。
+
+        is_archived = 1：
+            已归档任务跳过。
     """
     today = get_today_string()
 
     conn = get_connection()
     cursor = conn.cursor()
 
+    # 1. 习惯：每天更新 task_date 到今天
+    cursor.execute("""
+        UPDATE tasks
+        SET task_date = ?
+        WHERE task_type = 'habit'
+          AND is_archived = 0
+          AND (
+                task_date IS NULL
+                OR task_date != ?
+          )
+    """, (today, today))
+    habit_updated_count = cursor.rowcount
+
+    # 2. 启用中的一次性任务：
+    #    如果它在自己的 task_date 已经完成，则归档
     cursor.execute("""
         UPDATE tasks
         SET is_archived = 1
         WHERE task_type = 'task'
           AND is_archived = 0
-          AND substr(created_at, 1, 10) < ?
+          AND is_active = 1
+          AND task_date IS NOT NULL
+          AND task_date < ?
+          AND EXISTS (
+                SELECT 1
+                FROM checkins
+                WHERE checkins.task_id = tasks.id
+                  AND checkins.checkin_date = tasks.task_date
+          )
     """, (today,))
+    archived_done_task_count = cursor.rowcount
 
-    archived_count = cursor.rowcount
+    # 3. 一次性任务顺延：
+    #    A. 暂停中的 task：无论完成没完成，都顺延
+    #    B. 启用中的 task：没完成才顺延
+    cursor.execute("""
+        UPDATE tasks
+        SET task_date = ?,
+            is_archived = 0
+        WHERE task_type = 'task'
+          AND is_archived = 0
+          AND (
+                task_date IS NULL
+                OR task_date < ?
+          )
+          AND (
+                is_active = 0
+                OR NOT EXISTS (
+                    SELECT 1
+                    FROM checkins
+                    WHERE checkins.task_id = tasks.id
+                      AND checkins.checkin_date = tasks.task_date
+                )
+          )
+    """, (today, today))
+    rolled_task_count = cursor.rowcount
 
     conn.commit()
     conn.close()
 
-    if archived_count > 0:
+    changed_count = (
+        habit_updated_count
+        + archived_done_task_count
+        + rolled_task_count
+    )
+
+    if changed_count > 0:
         refresh_integrity_after_db_change()
 
-    return archived_count
+    return {
+        "habit_updated": habit_updated_count,
+        "task_archived": archived_done_task_count,
+        "task_rolled": rolled_task_count,
+        "total_changed": changed_count,
+    }
