@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QComboBox,
+    QMessageBox,
 )
 
 import config_manager
@@ -1068,10 +1069,87 @@ class SettingsDialog(QDialog):
 
     def on_placeholder_button_clicked(self, action):
         """
-        预留接口：设置页按钮点击事件。
-        后续根据 action 分发到真实功能。
+        设置页按钮点击事件。
+
+        当前已接入：
+            - 回到右下角
+            - 重置宠物位置
+
+        其他按钮暂时保留 TODO。
         """
+        if action == "回到右下角":
+            self.move_pet_to_bottom_right()
+            return
+
+        if action == "重置宠物位置":
+            self.reset_pet_position()
+            return
+
         print(f"TODO: 设置按钮点击：{action}")
+
+    def move_pet_to_bottom_right(self):
+        """
+        将宠物移动到屏幕右下角，并保存当前位置。
+        """
+        pet_window = self.get_pet_window()
+
+        if pet_window is None:
+            QMessageBox.information(self, "提示", "当前没有找到桌面宠物窗口。")
+            return
+
+        pet_window.move_to_bottom_right()
+
+        config_manager.update_pet_config(
+            x=pet_window.x(),
+            y=pet_window.y(),
+            visible=True,
+        )
+
+        pet_window.show()
+        pet_window.raise_()
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("宠物已回到右下角。")
+
+        QMessageBox.information(self, "提示", "宠物已回到右下角。")
+
+    def reset_pet_position(self):
+        """
+        清除保存的宠物位置，并让宠物回到默认右下角。
+        """
+        pet_window = self.get_pet_window()
+
+        if pet_window is None:
+            QMessageBox.information(self, "提示", "当前没有找到桌面宠物窗口。")
+            return
+
+        config_manager.update_pet_config(
+            x=None,
+            y=None,
+        )
+
+        pet_window.apply_pet_settings()
+
+        if config_manager.get_pet_config().get("visible", True):
+            pet_window.show()
+            pet_window.raise_()
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("宠物位置已重置。")
+
+        QMessageBox.information(self, "提示", "宠物位置已重置。")
+
+    def get_pet_window(self):
+        """
+        获取主窗口中的宠物窗口。
+        """
+        if self.main_window is None:
+            return None
+
+        if not hasattr(self.main_window, "pet_window"):
+            return None
+
+        return self.main_window.pet_window
 
     # =========================
     # 样式
