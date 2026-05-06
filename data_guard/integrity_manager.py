@@ -7,6 +7,7 @@ from datetime import datetime
 from data_guard.paths import (
     get_database_path,
     get_integrity_file_path,
+    get_legacy_integrity_file_path,
     ensure_data_guard_dirs,
 )
 
@@ -30,10 +31,35 @@ def calculate_file_sha256(file_path):
     return sha256.hexdigest()
 
 
+def migrate_legacy_integrity_file_if_needed():
+    """
+    如果旧位置存在 integrity.json，而新位置还没有，
+    则把旧完整性记录迁移到 data 目录。
+    """
+    ensure_data_guard_dirs()
+
+    new_path = get_integrity_file_path()
+    old_path = get_legacy_integrity_file_path()
+
+    if new_path.exists():
+        return False
+
+    if not old_path.exists():
+        return False
+
+    try:
+        old_path.replace(new_path)
+        return True
+    except OSError:
+        return False
+
+
 def load_integrity_info():
     """
     读取完整性校验信息。
     """
+    migrate_legacy_integrity_file_if_needed()
+
     integrity_path = get_integrity_file_path()
 
     if not integrity_path.exists():

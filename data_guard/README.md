@@ -48,12 +48,13 @@ C:\Users\用户名\AppData\Local\CheckMate\
 ```text
 %LOCALAPPDATA%\CheckMate\
 ├── data/
-│   └── checkmate.db
+│   ├── checkmate.db
+│   └── integrity.json
 └── data_backups/
     ├── auto_checkmate_xxx.db
+    ├── manual_checkmate_xxx.db
     ├── suspicious_checkmate_xxx.db
     ├── before_restore_checkmate_xxx.db
-    ├── integrity.json
     └── migration_done.txt
 ```
 

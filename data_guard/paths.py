@@ -72,6 +72,19 @@ def get_backup_dir():
 def get_integrity_file_path():
     """
     获取完整性校验文件路径。
+
+    integrity.json 应与正式数据库 checkmate.db 放在同一个 data 目录中，
+    表示它校验的是当前正在使用的数据库。
+    """
+    return get_database_dir() / "integrity.json"
+
+
+def get_legacy_integrity_file_path():
+    """
+    获取旧版本完整性校验文件路径。
+
+    旧版本 integrity.json 位于 data_backups 目录。
+    新版本改为放在 data 目录。
     """
     return get_backup_dir() / "integrity.json"
 

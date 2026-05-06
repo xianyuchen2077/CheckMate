@@ -1,7 +1,7 @@
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl, QSize
+from PySide6.QtCore import Qt, QUrl, QSize, QDateTime
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QDialog,
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QMessageBox,
     QFileDialog,
+    QApplication,
 )
 
 import database
@@ -30,6 +31,7 @@ from data_guard.paths import (
     get_database_dir,
     get_database_path,
     get_backup_dir,
+    get_log_dir,
 )
 
 from data_guard.backup_manager import (
@@ -99,6 +101,12 @@ class SettingsDialog(QDialog):
 
         self.nav_list = None
         self.page_stack = None
+
+        # 开发者模式隐藏入口
+        self.developer_click_count = 0
+        self.developer_first_click_time = None
+        self.developer_mode_enabled = False
+        self.developer_card = None
 
         self.init_ui()
         self.apply_styles()
@@ -759,6 +767,8 @@ class SettingsDialog(QDialog):
 
         slogan = QLabel("今天也别悄悄变成咸鱼。")
         slogan.setObjectName("aboutSlogan")
+        slogan.setCursor(Qt.CursorShape.PointingHandCursor)
+        slogan.mousePressEvent = self.handle_developer_slogan_click
 
         layout.addWidget(app_title)
         layout.addWidget(version_label)
@@ -770,6 +780,9 @@ class SettingsDialog(QDialog):
         layout.addWidget(slogan)
 
         self.add_to_container(container, about_card)
+        self.developer_card = self.create_developer_card()
+        self.developer_card.hide()
+        self.add_to_container(container, self.developer_card)
 
         link_buttons = self.create_button_row(
             title="相关链接",
@@ -1245,6 +1258,18 @@ class SettingsDialog(QDialog):
 
         if action == "查看 README":
             self.open_readme()
+            return
+
+        if action == "打开日志文件夹":
+            self.open_log_folder()
+            return
+
+        if action == "打开配置文件":
+            self.open_config_file()
+            return
+
+        if action == "复制诊断信息":
+            self.copy_diagnostic_info()
             return
 
         print(f"TODO: 设置按钮点击：{action}")
@@ -1794,6 +1819,194 @@ class SettingsDialog(QDialog):
         if self.main_window is not None and hasattr(self.main_window, "tip_label"):
             self.main_window.tip_label.setText("已打开 GitHub README。")
 
+    def handle_developer_slogan_click(self, event):
+        """
+        关于软件 slogan 隐藏点击入口。
+
+        规则：
+            5 秒内连续点击“今天也别悄悄变成咸鱼。”6 次，开启开发者模式。
+        """
+        now = QDateTime.currentDateTime()
+
+        if self.developer_first_click_time is None:
+            self.developer_first_click_time = now
+            self.developer_click_count = 1
+        else:
+            elapsed_ms = self.developer_first_click_time.msecsTo(now)
+
+            if elapsed_ms > 5 * 1000:
+                self.developer_first_click_time = now
+                self.developer_click_count = 1
+            else:
+                self.developer_click_count += 1
+
+        remaining = 6 - self.developer_click_count
+
+        if remaining > 0:
+            print(f"开发者模式还需要点击 {remaining} 次")
+            return
+
+        self.enable_developer_mode()
+
+    def enable_developer_mode(self):
+        """
+        开启隐藏开发者模式。
+        """
+        if self.developer_mode_enabled:
+            return
+
+        self.developer_mode_enabled = True
+        self.developer_click_count = 0
+        self.developer_first_click_time = None
+
+        if self.developer_card is not None:
+            self.developer_card.show()
+
+        QMessageBox.information(
+            self,
+            "开发者模式",
+            "开发者模式已开启 🐟"
+        )
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("开发者模式已开启。")
+
+    def create_developer_card(self):
+        """
+        创建隐藏开发者模式区域。
+        默认隐藏，触发彩蛋后显示。
+        """
+        card = QFrame()
+        card.setObjectName("developerCard")
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+        card.setLayout(layout)
+
+        title_label = QLabel("开发者模式")
+        title_label.setObjectName("settingTitle")
+
+        desc_label = QLabel(
+            "该区域用于调试 CheckMate 数据和运行状态。普通使用时不需要开启。"
+        )
+        desc_label.setWordWrap(True)
+        desc_label.setObjectName("settingDescription")
+
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+        button_layout.addStretch()
+
+        buttons = [
+            "打开日志文件夹",
+            "打开配置文件",
+            "复制诊断信息",
+        ]
+
+        for text in buttons:
+            button = QPushButton(text)
+            button.setFixedHeight(34)
+            button.setObjectName("secondaryButton")
+            button.clicked.connect(
+                lambda checked=False, action=text: self.on_placeholder_button_clicked(action)
+            )
+            button_layout.addWidget(button)
+
+        layout.addWidget(title_label)
+        layout.addWidget(desc_label)
+        layout.addLayout(button_layout)
+
+        return card
+
+    def open_log_folder(self):
+        """
+        打开 CheckMate 日志文件夹。
+        """
+        log_dir = get_log_dir()
+        self.open_folder(log_dir)
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("已打开日志文件夹。")
+
+
+    def open_config_file(self):
+        """
+        打开 config.json 配置文件。
+        如果配置文件不存在，则先创建默认配置文件。
+        """
+        config_path = config_manager.CONFIG_PATH
+
+        if not config_path.exists():
+            config = config_manager.load_config()
+            config_manager.save_config(config)
+
+        QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(config_path))
+        )
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("已打开配置文件。")
+
+
+    def build_diagnostic_info(self):
+        """
+        构造诊断信息文本。
+        """
+        integrity_text = self.get_database_status_text()
+        backup_text = self.get_backup_count_text()
+
+        lines = [
+            "CheckMate 诊断信息",
+            "",
+            f"版本：v0.1.0",
+            f"数据库文件：{get_database_path()}",
+            f"备份文件夹：{get_backup_dir()}",
+            f"日志文件夹：{get_log_dir()}",
+            f"配置文件：{config_manager.CONFIG_PATH}",
+            "",
+            f"数据库状态：{integrity_text}",
+            f"备份数量：{backup_text}",
+        ]
+
+        try:
+            pet_config = config_manager.get_pet_config()
+            lines.extend([
+                "",
+                "宠物配置：",
+                f"visible = {pet_config.get('visible')}",
+                f"show_on_startup = {pet_config.get('show_on_startup')}",
+                f"always_on_top = {pet_config.get('always_on_top')}",
+                f"opacity = {pet_config.get('opacity')}",
+                f"x = {pet_config.get('x')}",
+                f"y = {pet_config.get('y')}",
+            ])
+        except Exception as error:
+            lines.extend([
+                "",
+                f"读取宠物配置失败：{error}",
+            ])
+
+        return "\n".join(lines)
+
+
+    def copy_diagnostic_info(self):
+        """
+        复制诊断信息到剪贴板。
+        """
+        diagnostic_info = self.build_diagnostic_info()
+
+        clipboard = QApplication.clipboard()
+        clipboard.setText(diagnostic_info)
+
+        QMessageBox.information(
+            self,
+            "诊断信息已复制",
+            "诊断信息已复制到剪贴板。"
+        )
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("诊断信息已复制到剪贴板。")
+
     # =========================
     # 样式
     # =========================
@@ -1953,6 +2166,12 @@ class SettingsDialog(QDialog):
             #hintCard {
                 background-color: #eff6ff;
                 border: 1px solid #bfdbfe;
+                border-radius: 14px;
+            }
+
+            #developerCard {
+                background-color: #fff7ed;
+                border: 1px solid #fed7aa;
                 border-radius: 14px;
             }
 
