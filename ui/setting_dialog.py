@@ -25,7 +25,6 @@ import database
 import config_manager
 
 from data_guard.paths import (
-    get_user_data_root_dir,
     ensure_data_guard_dirs,
     get_database_dir,
     get_database_path,
@@ -48,6 +47,9 @@ from data_guard.integrity_manager import (
     trust_current_database,
 )
 
+GITHUB_REPO_URL = "https://github.com/xianyuchen2077/CheckMate"
+GITHUB_RELEASE_URL = "https://github.com/xianyuchen2077/CheckMate/releases"
+
 class SettingsDialog(QDialog):
     """
     CheckMate 设置窗口。
@@ -58,7 +60,7 @@ class SettingsDialog(QDialog):
         - 桌面宠物
         - 数据管理
         - 外观设置
-        - 关于
+        - 关于软件
 
     后续再逐步接入 config_manager、auto_start、data_guard 等真实逻辑。
     """
@@ -127,7 +129,7 @@ class SettingsDialog(QDialog):
             "桌面宠物",
             "数据管理",
             "外观设置",
-            "关于",
+            "关于软件",
         ]
 
         for text in nav_items:
@@ -706,7 +708,7 @@ class SettingsDialog(QDialog):
         return page
 
     def create_about_page(self):
-        page = self.create_scroll_page("关于", "CheckMate / 不要成为咸鱼")
+        page = self.create_scroll_page("关于CheckMate —— 不要成为咸鱼","")
 
         container = page.findChild(QWidget, "pageContent")
 
@@ -718,14 +720,14 @@ class SettingsDialog(QDialog):
         layout.setSpacing(10)
         about_card.setLayout(layout)
 
-        app_title = QLabel("CheckMate / 不要成为咸鱼")
+        app_title = QLabel("CheckMate —— 不要成为咸鱼")
         app_title.setObjectName("aboutTitle")
 
-        version_label = QLabel("版本：v0.1.0-beta")
+        version_label = QLabel("版本：v0.1.0")
         version_label.setObjectName("settingDescription")
 
         desc = QLabel(
-            "一个带桌面宠物、任务提醒、重复提醒、宠物养成和数据安全保护的本地打卡督促小程序。"
+            "一个带桌面宠物、任务提醒、习惯打卡的本地打卡督促小程序。"
         )
         desc.setWordWrap(True)
         desc.setObjectName("settingDescription")
@@ -756,7 +758,7 @@ class SettingsDialog(QDialog):
 
         link_buttons = self.create_button_row(
             title="相关链接",
-            description="后续可以接入 GitHub 仓库、Release 页面和 README。",
+            description="可以点个star⭐支持一下，也欢迎提交 issue 和 PR。",
             buttons=["打开 GitHub 仓库", "打开 Release 页面", "查看 README"],
         )
         self.add_to_container(container, link_buttons)
@@ -1162,6 +1164,18 @@ class SettingsDialog(QDialog):
 
         if action == "清理可疑备份":
             self.cleanup_suspicious_backups_from_settings()
+            return
+
+        if action == "打开 GitHub 仓库":
+            self.open_github_repo()
+            return
+
+        if action == "打开 Release 页面":
+            self.open_release_page()
+            return
+
+        if action == "查看 README":
+            self.open_readme()
             return
 
         print(f"TODO: 设置按钮点击：{action}")
@@ -1652,6 +1666,41 @@ class SettingsDialog(QDialog):
             return None
 
         return self.main_window.pet_window
+
+    def open_url(self, url):
+        """
+        使用系统默认浏览器打开网页。
+        """
+        QDesktopServices.openUrl(QUrl(url))
+
+
+    def open_github_repo(self):
+        """
+        打开 GitHub 仓库页面。
+        """
+        self.open_url(GITHUB_REPO_URL)
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("已打开 GitHub 仓库页面。")
+
+
+    def open_release_page(self):
+        """
+        打开 GitHub Releases 页面。
+        """
+        self.open_url(GITHUB_RELEASE_URL)
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("已打开 Release 页面。")
+
+    def open_readme(self):
+        """
+        打开 GitHub README 页面。
+        """
+        self.open_url(f"{GITHUB_REPO_URL}#readme")
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("已打开 GitHub README。")
 
     # =========================
     # 样式
