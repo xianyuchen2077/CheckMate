@@ -10,6 +10,7 @@ LEGACY_CONFIG_PATH = get_app_dir() / "config.json"
 
 DEFAULT_CONFIG = {
     "pet": {
+        "visible": True,
         "opacity": 1.0,
         "show_on_startup": True,
         "always_on_top": True,

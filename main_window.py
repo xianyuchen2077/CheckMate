@@ -31,6 +31,7 @@ from pet_growth_dialog import PetGrowthDialog
 from data_guard.startup_guard import run_startup_data_guard
 from data_guard.migration_manager import migrate_legacy_database_if_needed
 from data_guard.logger import log_info
+from ui.setting_dialog import SettingsDialog
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -158,6 +159,7 @@ class MainWindow(QMainWindow):
         self.delete_btn = QPushButton("删除任务")
         self.toggle_active_btn = QPushButton("暂停/启用")
         self.history_btn = QPushButton("历史记录")
+        self.setting_btn = QPushButton("设置")
 
         self.add_btn.clicked.connect(self.add_task)
         self.edit_btn.clicked.connect(self.edit_task)
@@ -165,6 +167,7 @@ class MainWindow(QMainWindow):
         self.delete_btn.clicked.connect(self.delete_task)
         self.toggle_active_btn.clicked.connect(self.toggle_task_active)
         self.history_btn.clicked.connect(self.show_history)
+        self.setting_btn.clicked.connect(self.show_settings)
 
         button_layout.addWidget(self.add_btn)
         button_layout.addWidget(self.edit_btn)
@@ -172,6 +175,7 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(self.delete_btn)
         button_layout.addWidget(self.toggle_active_btn)
         button_layout.addWidget(self.history_btn)
+        button_layout.addWidget(self.setting_btn)
         task_layout.addLayout(button_layout)
         left_panel.addWidget(task_card)
 
@@ -258,7 +262,11 @@ class MainWindow(QMainWindow):
         self.pet_window = PetWindow(self)
 
         pet_config = config_manager.get_pet_config()
-        if pet_config.get("show_on_startup", True):
+
+        pet_visible = pet_config.get("visible", True)
+        show_on_startup = pet_config.get("show_on_startup", True)
+
+        if pet_visible and show_on_startup:
             self.pet_window.show()
 
     def apply_styles(self):
@@ -278,6 +286,39 @@ class MainWindow(QMainWindow):
     def show_history(self):
         dialog = HistoryDialog(self)
         dialog.exec()
+
+    def show_settings(self):
+        """
+        打开设置窗口。
+        当前设置页先作为 UI 壳子展示，后续再逐步接入真实配置逻辑。
+        """
+        dialog = SettingsDialog(self)
+        dialog.exec()
+
+    def apply_pet_settings_from_dialog(self):
+        """
+        设置窗口点击“应用”后，刷新桌面宠物设置。
+
+        当前接入：
+            - 显示 / 隐藏桌面宠物
+            - 启动时显示桌面宠物
+            - 宠物窗口置顶
+            - 宠物透明度
+        """
+        if not hasattr(self, "pet_window"):
+            return
+
+        pet_config = config_manager.get_pet_config()
+
+        self.pet_window.apply_pet_settings()
+
+        if pet_config.get("visible", True):
+            self.pet_window.show()
+            self.pet_window.raise_()
+        else:
+            self.pet_window.hide()
+
+        self.tip_label.setText("宠物设置已应用。")
 
     def show_data_guard_warning_if_needed(self):
         """

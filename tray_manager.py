@@ -88,6 +88,9 @@ class TrayManager:
         self.auto_start_action.setChecked(auto_start.is_auto_start_enabled())
         self.auto_start_action.triggered.connect(self.toggle_auto_start)
 
+        settings_action = QAction("设置", self.main_window)
+        settings_action.triggered.connect(self.main_window.show_settings)
+
         quit_action = QAction("退出程序", self.main_window)
         quit_action.triggered.connect(self.main_window.quit_app)
 
@@ -95,6 +98,8 @@ class TrayManager:
         tray_menu.addAction(show_pet_action)
         tray_menu.addSeparator()
         tray_menu.addAction(self.auto_start_action)
+        tray_menu.addSeparator()
+        tray_menu.addAction(settings_action)
         tray_menu.addSeparator()
         tray_menu.addAction(quit_action)
 

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QComboBox,
 )
 
+import config_manager
 
 class SettingsDialog(QDialog):
     """
@@ -33,6 +34,14 @@ class SettingsDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        self.main_window = parent
+
+        # 宠物设置控件引用
+        self.pet_visible_switch = None
+        self.pet_startup_switch = None
+        self.pet_top_switch = None
+        self.pet_opacity_slider = None
 
         self.setWindowTitle("设置 - CheckMate")
         self.setFixedSize(780, 540)
@@ -339,25 +348,33 @@ class SettingsDialog(QDialog):
 
         container = page.findChild(QWidget, "pageContent")
 
-        self.add_switch_row(
+        pet_config = config_manager.get_pet_config()
+
+        pet_visible = bool(pet_config.get("visible", True))
+        pet_show_on_startup = bool(pet_config.get("show_on_startup", True))
+        pet_always_on_top = bool(pet_config.get("always_on_top", True))
+        pet_opacity = float(pet_config.get("opacity", 1.0))
+        pet_opacity_percent = int(pet_opacity * 100)
+
+        self.pet_visible_switch = self.add_switch_row(
             container,
             title="显示桌面宠物",
-            description="关闭后隐藏桌面宠物，但不影响提醒功能。",
-            checked=True,
+            description="关闭后隐藏桌面宠物，但不影响任务提醒功能。",
+            checked=pet_visible,
         )
 
-        self.add_switch_row(
+        self.pet_top_switch = self.add_switch_row(
             container,
             title="宠物窗口置顶",
             description="让宠物始终显示在其他窗口上方。",
-            checked=True,
+            checked=pet_always_on_top,
         )
 
-        self.add_slider_row(
+        self.pet_opacity_slider = self.add_slider_row(
             container,
             title="宠物透明度",
             description="调整桌面宠物窗口透明度。",
-            value=90,
+            value=pet_opacity_percent,
             minimum=30,
             maximum=100,
             suffix="%",
@@ -381,11 +398,11 @@ class SettingsDialog(QDialog):
             current_index=0,
         )
 
-        self.add_switch_row(
+        self.pet_startup_switch = self.add_switch_row(
             container,
             title="启动时显示宠物",
             description="打开程序时自动显示桌面宠物。",
-            checked=True,
+            checked=pet_show_on_startup,
         )
 
         self.add_switch_row(
@@ -1001,10 +1018,45 @@ class SettingsDialog(QDialog):
 
     def on_apply_settings(self):
         """
-        预留接口：应用设置但不关闭窗口。
-        后续接入 config_manager 后，在这里保存配置并通知主窗口刷新。
+        应用设置但不关闭窗口。
+
+        当前已接入：
+            - 显示 / 隐藏桌面宠物
+            - 启动时显示宠物
+            - 宠物窗口置顶
+            - 宠物透明度
         """
-        print("TODO: 应用设置")
+        if (
+            self.pet_visible_switch is None
+            or self.pet_startup_switch is None
+            or self.pet_top_switch is None
+            or self.pet_opacity_slider is None
+        ):
+            print("宠物设置控件尚未初始化。")
+            return
+
+        visible = self.pet_visible_switch.isChecked()
+        show_on_startup = self.pet_startup_switch.isChecked()
+        always_on_top = self.pet_top_switch.isChecked()
+        opacity = self.pet_opacity_slider.value() / 100
+
+        config_manager.update_pet_config(
+            visible=visible,
+            show_on_startup=show_on_startup,
+            always_on_top=always_on_top,
+            opacity=opacity,
+        )
+
+        if self.main_window is not None and hasattr(self.main_window, "apply_pet_settings_from_dialog"):
+            self.main_window.apply_pet_settings_from_dialog()
+
+        print(
+            "已应用宠物设置："
+            f"visible={visible}, "
+            f"show_on_startup={show_on_startup}, "
+            f"always_on_top={always_on_top}, "
+            f"opacity={opacity}"
+        )
 
 
     def on_save_and_close(self):
