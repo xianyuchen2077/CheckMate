@@ -7,7 +7,7 @@ import config_manager
 from pet_system import pet_growth
 from pet_settings_dialog import PetSettingsDialog
 
-from PySide6.QtCore import Qt, QPoint, QTimer, QSize
+from PySide6.QtCore import Qt, QPoint, QTimer, QSize, QDateTime
 from PySide6.QtGui import QColor, QPixmap, QAction, QMovie
 from PySide6.QtWidgets import (
     QApplication,
@@ -53,6 +53,12 @@ class PetWindow(QWidget):
         self.is_reminding = False
         self.is_status_locked = False
         self.press_global_pos = QPoint()
+
+        # 宠物连点彩蛋：
+        # 5 秒内连续点击 15 次及以上触发
+        self.pet_easter_click_count = 0
+        self.pet_easter_first_click_time = None
+        self.is_pet_easter_mode = False
 
         self.setMouseTracking(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -358,6 +364,11 @@ class PetWindow(QWidget):
             "done": candidates("pet_done"),
             "lazy": candidates("pet_lazy"),
             "sleep": candidates("pet_sleep"),
+
+            # 彩蛋状态
+            "tired": candidates("tired") + candidates("pet_lazy"),
+            "unconscious": candidates("unconscious") + candidates("pet_sleep") + candidates("pet_lazy"),
+            "dead": candidates("dead") + candidates("pet_dead_fish") + candidates("pet_sleep") + candidates("pet_lazy"),
         }
 
     def switch_skin(self, skin_name):
@@ -401,6 +412,9 @@ class PetWindow(QWidget):
             return
 
         if getattr(self, "is_status_locked", False):
+            return
+
+        if getattr(self, "is_pet_easter_mode", False):
             return
 
         self.say_random_idle_message()
@@ -541,6 +555,118 @@ class PetWindow(QWidget):
         self.load_pet_image("sleep")
         self.pet_text.setText("暂时休息一下")
 
+    def handle_pet_click_easter_egg(self):
+        """
+        宠物连点彩蛋。
+
+        触发规则：
+            5 秒内连续点击桌面宠物 15 次及以上。
+
+        效果：
+            从 tired / unconscious / dead 三种状态里随机选一种，
+            持续 5 秒后恢复正常。
+        """
+        if self.is_pet_easter_mode:
+            return
+
+        # 提醒状态下不触发彩蛋，避免盖掉重要提醒
+        if getattr(self, "is_reminding", False):
+            return
+
+        now = QDateTime.currentDateTime()
+
+        if self.pet_easter_first_click_time is None:
+            self.pet_easter_first_click_time = now
+            self.pet_easter_click_count = 1
+        else:
+            elapsed_ms = self.pet_easter_first_click_time.msecsTo(now)
+
+            # 超过 5 秒，重新计数
+            if elapsed_ms > 5 * 1000:
+                self.pet_easter_first_click_time = now
+                self.pet_easter_click_count = 1
+            else:
+                self.pet_easter_click_count += 1
+
+        # 还没到 15 次，不触发
+        if self.pet_easter_click_count < 15:
+            return
+
+        self.pet_easter_click_count = 0
+        self.pet_easter_first_click_time = None
+
+        random_state = random.choice(["tired", "unconscious", "dead"])
+
+        self.enter_pet_easter_mode(
+            state_name=random_state,
+            message="我先躺一会儿，你继续努力。",
+            duration_ms=5 * 1000,
+        )
+
+    def resolve_pet_click_easter_egg(self, count_snapshot):
+        """
+        用户停止连点后，根据 10 秒内最终点击次数触发不同状态。
+        """
+        if self.is_pet_easter_mode:
+            return
+
+        # 如果这 700ms 内又点了新的次数，说明用户还没停，当前判断作废。
+        if count_snapshot != self.pet_easter_click_count:
+            return
+
+        click_count = self.pet_easter_click_count
+
+        if click_count < 10:
+            return
+
+        if 10 <= click_count <= 15:
+            self.enter_pet_easter_mode(
+                state_name="tired",
+                message="我有点累了，但还能抢救一下。",
+                duration_ms=5 * 1000,
+            )
+        elif 16 <= click_count <= 24:
+            self.enter_pet_easter_mode(
+                state_name="unconscious",
+                message="我先晕一会儿，你继续努力。",
+                duration_ms=5 * 1000,
+            )
+        else:
+            self.enter_pet_easter_mode(
+                state_name="dead",
+                message="我先躺一会儿，你继续努力。",
+                duration_ms=5 * 1000,
+            )
+
+        self.pet_easter_click_count = 0
+        self.pet_easter_first_click_time = None
+
+    def enter_pet_easter_mode(self, state_name, message, duration_ms=5000):
+        """
+        进入宠物连点彩蛋状态。
+        """
+        if self.is_pet_easter_mode:
+            return
+
+        self.is_pet_easter_mode = True
+        self.is_reminding = False
+        self.is_status_locked = True
+
+        self.set_text_color("#6b7280")
+        self.load_pet_image(state_name)
+        self.pet_text.setText(message)
+
+        QTimer.singleShot(duration_ms, self.exit_pet_easter_mode)
+
+
+    def exit_pet_easter_mode(self):
+        """
+        退出宠物连点彩蛋状态，恢复普通状态。
+        """
+        self.is_pet_easter_mode = False
+        self.is_status_locked = False
+        self.set_idle()
+
     def set_progress(self, done, total):
         self.is_reminding = False
         self.set_text_color("#F9F756")
@@ -632,7 +758,10 @@ class PetWindow(QWidget):
 
             # 移动距离很小，认为是一次单击
             if moved_distance < 5:
-                self.say_random_idle_message()
+                self.handle_pet_click_easter_egg()
+
+                if not self.is_pet_easter_mode:
+                    self.say_random_idle_message()
 
             event.accept()
 
