@@ -629,7 +629,7 @@ class MainWindow(QMainWindow):
 
             # 只有“设置了提醒时间”且“是重复任务”时，才重新安排下一次重复提醒
             if remind_time and self.is_repeat_task(repeat_interval_minutes):
-                self.reminder_manager.schedule_repeat_if_needed(
+                self.reminder_manager.schedule_repeat_from_base_if_needed(
                     task_id,
                     title,
                     remind_time,

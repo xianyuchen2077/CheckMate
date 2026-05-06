@@ -30,9 +30,17 @@ class ReminderManager:
     def start(self):
         """
         启动提醒检查定时器。
-        每 30 秒检查一次是否有到点且未完成的任务。
+        每 30 秒检查一次普通到点提醒。
+
+        重复提醒任务会在启动时按基础提醒时间和重复间隔，
+        自动计算第一个晚于当前时间的提醒点。
         """
         self.timer.start(30 * 1000)
+
+        # 启动时补齐重复提醒链：
+        # 例如 09:00 + 每 1 小时，当前 09:10，则安排到 10:00。
+        self.schedule_all_repeat_tasks_from_base()
+
         self.check_reminders()
 
     def check_reminders(self):
@@ -46,6 +54,10 @@ class ReminderManager:
             title = task["title"]
             remind_time = task["remind_time"]
             repeat_interval_minutes = task["repeat_interval_minutes"]
+
+            # 重复提醒任务由 repeat_timers 接管
+            if self.is_valid_repeat_task(repeat_interval_minutes):
+                continue
 
             today = database.get_today_string()
             skip_today_key = f"{today}-{task_id}"
@@ -247,6 +259,58 @@ class ReminderManager:
 
         self.cancel_task_timers(task_id)
 
+    def is_valid_repeat_task(self, repeat_interval_minutes):
+        """
+        判断是否是有效重复提醒任务。
+        """
+        if repeat_interval_minutes is None:
+            return False
+
+        try:
+            repeat_interval_minutes = int(repeat_interval_minutes)
+        except (TypeError, ValueError):
+            return False
+
+        return repeat_interval_minutes > 0
+
+    def calculate_next_repeat_time_from_base(self, remind_time, repeat_interval_minutes):
+        try:
+            repeat_interval_minutes = int(repeat_interval_minutes)
+        except (TypeError, ValueError):
+            return None
+
+        if repeat_interval_minutes <= 0:
+            return None
+
+        if not remind_time:
+            return None
+
+        try:
+            hour, minute = map(int, remind_time.split(":"))
+        except (TypeError, ValueError):
+            return None
+
+        now = datetime.now()
+
+        candidate = now.replace(
+            hour=hour,
+            minute=minute,
+            second=0,
+            microsecond=0
+        )
+
+        # 如果今天的基础提醒时间还没到，就直接用今天 remind_time
+        if candidate > now:
+            return candidate
+
+        # 如果已经过了，就不断加重复间隔，直到找到第一个未来时间
+        interval = timedelta(minutes=repeat_interval_minutes)
+
+        while candidate <= now:
+            candidate += interval
+
+        return candidate
+
     def set_next_remind_time(self, task_id, next_time):
         """
         记录某个任务下一次真实提醒时间，并刷新 UI。
@@ -419,6 +483,76 @@ class ReminderManager:
             latest_repeat_interval_minutes
         )
 
+    def schedule_repeat_from_base_if_needed(
+        self,
+        task_id,
+        title,
+        remind_time,
+        repeat_interval_minutes
+    ):
+        """
+        根据任务原始 remind_time 和 repeat_interval_minutes，
+        安排第一个晚于当前时间的重复提醒。
+
+        用于：
+            1. 程序启动后初始化重复提醒
+            2. 每日刷新后重新安排重复提醒
+            3. 编辑任务后重新安排重复提醒
+
+        注意：
+            用户点击完成后的下一次提醒，仍然使用 schedule_repeat_if_needed()，
+            即“当前完成时间 + repeat_interval_minutes”。
+        """
+        if not self.is_valid_repeat_task(repeat_interval_minutes):
+            return
+
+        today = database.get_today_string()
+        skip_today_key = f"{today}-{task_id}"
+
+        if skip_today_key in self.skip_today_keys:
+            return
+
+        if not database.is_task_active(task_id):
+            return
+
+        next_time = self.calculate_next_repeat_time_from_base(
+            remind_time,
+            repeat_interval_minutes
+        )
+
+        if next_time is None:
+            return
+
+        delay_ms = int((next_time - datetime.now()).total_seconds() * 1000)
+
+        if delay_ms <= 0:
+            delay_ms = 1000
+
+        repeat_timer_key = f"{today}-{task_id}"
+
+        # 重新按基础时间安排前，先取消这个任务旧的重复 / 稍后 timer
+        self.cancel_task_timers(task_id)
+
+        timer = QTimer(self.main_window)
+        timer.setSingleShot(True)
+
+        timer.timeout.connect(
+            lambda: self.handle_repeat_timeout(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes,
+                repeat_timer_key
+            )
+        )
+
+        self.repeat_timers[task_id] = timer
+        self.repeat_timer_keys.add(repeat_timer_key)
+
+        timer.start(delay_ms)
+
+        self.set_next_remind_time(task_id, next_time)
+
     def schedule_repeat_if_needed(
         self,
         task_id,
@@ -498,6 +632,40 @@ class ReminderManager:
         timer.start(delay_ms)
 
         self.set_next_remind_time(task_id, next_time)
+
+    def schedule_all_repeat_tasks_from_base(self):
+        """
+        根据当前今日任务列表，为所有有效重复提醒任务安排下一次提醒。
+
+        用于：
+            - ReminderManager.start()
+            - 每日刷新后
+            - 批量刷新提醒链路时
+        """
+        tasks = database.get_all_tasks_with_today_status()
+
+        for task in tasks:
+            task_id = task["id"]
+            title = task["title"]
+            remind_time = task["remind_time"]
+            repeat_interval_minutes = task["repeat_interval_minutes"]
+            is_active = task["is_active"]
+
+            if not is_active:
+                continue
+
+            if not remind_time:
+                continue
+
+            if not self.is_valid_repeat_task(repeat_interval_minutes):
+                continue
+
+            self.schedule_repeat_from_base_if_needed(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes
+            )
 
     def handle_repeat_timeout(
         self,
@@ -592,14 +760,6 @@ class ReminderManager:
     def reset_daily_state(self):
         """
         跨天后清理提醒管理器的当天状态。
-
-        需要清理：
-            reminded_keys
-            skip_today_keys
-            repeat_timer_keys
-            repeat_timers
-            snooze_timers
-            next_remind_times
         """
         self.reminded_keys.clear()
         self.skip_today_keys.clear()
@@ -617,3 +777,5 @@ class ReminderManager:
 
         if hasattr(self, "next_remind_times"):
             self.next_remind_times.clear()
+
+        self.schedule_all_repeat_tasks_from_base()
