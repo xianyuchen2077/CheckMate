@@ -9,6 +9,14 @@ LEGACY_CONFIG_PATH = get_app_dir() / "config.json"
 
 
 DEFAULT_CONFIG = {
+    "general": {
+        "show_main_window_on_startup": True,
+        "minimize_to_tray_on_close": True,
+        "confirm_before_exit": True,
+        "show_tray_messages": True,
+        "check_data_guard_on_startup": True,
+        "refresh_tasks_on_startup": True,
+    },
     "pet": {
         "visible": True,
         "opacity": 1.0,
@@ -85,6 +93,28 @@ def merge_config(default_config, user_config):
             result[key] = value
 
     return result
+
+
+
+def get_general_config():
+    config = load_config()
+    return config["general"]
+
+
+def update_general_config(**kwargs):
+    """
+    更新常规配置。
+
+    用法：
+        update_general_config(show_main_window_on_startup=True)
+        update_general_config(minimize_to_tray_on_close=True)
+    """
+    config = load_config()
+
+    for key, value in kwargs.items():
+        config["general"][key] = value
+
+    save_config(config)
 
 
 def get_pet_config():

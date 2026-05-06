@@ -69,19 +69,28 @@ class MainWindow(QMainWindow):
 
         database.init_db()
 
-        refresh_result = database.refresh_tasks_for_today()
+        general_config = config_manager.get_general_config()
 
-        if refresh_result["total_changed"] > 0:
-            log_info(
-                "每日任务刷新："
-                f"习惯顺延 {refresh_result['habit_updated']} 个，"
-                f"任务归档 {refresh_result['task_archived']} 个，"
-                f"任务顺延 {refresh_result['task_rolled']} 个，"
-                f"其中暂停任务顺延 {refresh_result.get('paused_task_rolled', 0)} 个，"
-                f"未完成任务顺延 {refresh_result.get('unfinished_task_rolled', 0)} 个"
-            )
+        if general_config.get("refresh_tasks_on_startup", True):
+            refresh_result = database.refresh_tasks_for_today()
 
-        self.data_guard_result = run_startup_data_guard()
+            if refresh_result["total_changed"] > 0:
+                log_info(
+                    "每日任务刷新："
+                    f"习惯顺延 {refresh_result['habit_updated']} 个，"
+                    f"任务归档 {refresh_result['task_archived']} 个，"
+                    f"任务顺延 {refresh_result['task_rolled']} 个，"
+                    f"其中暂停任务顺延 {refresh_result.get('paused_task_rolled', 0)} 个，"
+                    f"未完成任务顺延 {refresh_result.get('unfinished_task_rolled', 0)} 个"
+                )
+        else:
+            log_info("启动时每日刷新已被设置关闭。")
+
+        if general_config.get("check_data_guard_on_startup", True):
+            self.data_guard_result = run_startup_data_guard()
+        else:
+            self.data_guard_result = None
+            log_info("启动时数据安全检查已被设置关闭。")
 
         self.setWindowTitle("CheckMate - 不要成为咸鱼")
         self.resize(1050, 700)
@@ -372,6 +381,21 @@ class MainWindow(QMainWindow):
             self.pet_window.activateWindow()
 
     def quit_app(self):
+        general_config = config_manager.get_general_config()
+        confirm_before_exit = bool(general_config.get("confirm_before_exit", True))
+
+        if confirm_before_exit:
+            reply = QMessageBox.question(
+                self,
+                "退出 CheckMate",
+                "确定要退出 CheckMate 吗？🐟\n\n退出后将不会继续提醒任务。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
         self.force_quit = True
 
         if hasattr(self, "pet_window"):
@@ -387,16 +411,44 @@ class MainWindow(QMainWindow):
             event.accept()
             return
 
-        event.ignore()
-        self.hide()
+        general_config = config_manager.get_general_config()
 
-        if hasattr(self, "tray_manager"):
-            self.tray_manager.show_message(
-                "CheckMate 仍在运行",
-                "我已经缩到系统托盘啦，到点还会提醒你，不要成为咸鱼。",
-                3000,
-                icon_type="default"
-            )
+        minimize_to_tray = bool(
+            general_config.get("minimize_to_tray_on_close", True)
+        )
+
+        show_tray_messages = bool(
+            general_config.get("show_tray_messages", True)
+        )
+
+        if minimize_to_tray:
+            event.ignore()
+            self.hide()
+
+            if show_tray_messages and hasattr(self, "tray_manager"):
+                self.tray_manager.show_message(
+                    "CheckMate 仍在运行",
+                    "我已经缩到系统托盘啦，到点还会提醒你，不要成为咸鱼。",
+                    3000,
+                    icon_type="default"
+                )
+
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "退出 CheckMate",
+            "确定要退出 CheckMate 吗？🐟\n\n退出后将不会继续提醒任务。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.force_quit = True
+            event.accept()
+            QApplication.quit()
+        else:
+            event.ignore()
 
     def load_tasks(self):
         self.task_list.clear()

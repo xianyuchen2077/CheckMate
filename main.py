@@ -5,6 +5,7 @@ from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import QApplication
 
 from main_window import MainWindow
+import config_manager
 
 
 def get_base_dir():
@@ -44,7 +45,12 @@ def main():
     if icon_path:
         window.setWindowIcon(QIcon(icon_path))
 
-    window.show()
+    general_config = config_manager.get_general_config()
+
+    if general_config.get("show_main_window_on_startup", True):
+        window.show()
+    else:
+        window.hide()
 
     sys.exit(app.exec())
 

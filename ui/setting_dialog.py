@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 import database
 import config_manager
+import auto_start
 
 from data_guard.paths import (
     ensure_data_guard_dirs,
@@ -69,6 +70,16 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
 
         self.main_window = parent
+
+        # 常规设置控件引用
+        self.auto_start_switch = None
+        self.show_main_window_switch = None
+        self.general_pet_startup_switch = None
+        self.minimize_to_tray_switch = None
+        self.confirm_before_exit_switch = None
+        self.startup_data_guard_switch = None
+        self.startup_daily_refresh_switch = None
+        self.show_tray_messages_switch = None
 
         # 宠物设置控件引用
         self.pet_visible_switch = None
@@ -220,68 +231,72 @@ class SettingsDialog(QDialog):
 
         container = page.findChild(QWidget, "pageContent")
 
-        self.add_switch_row(
+        general_config = config_manager.get_general_config()
+        pet_config = config_manager.get_pet_config()
+
+        self.auto_start_switch = self.add_switch_row(
             container,
             title="开机自启动",
             description="Windows 登录后自动启动 CheckMate。",
-            checked=False,
+            checked=auto_start.is_auto_start_enabled(),
         )
 
-        self.add_switch_row(
+        self.show_main_window_switch = self.add_switch_row(
             container,
             title="启动时显示主窗口",
             description="打开程序时自动显示主窗口。",
-            checked=True,
+            checked=bool(general_config.get("show_main_window_on_startup", True)),
         )
 
-        self.add_switch_row(
+        self.general_pet_startup_switch = self.add_switch_row(
             container,
             title="启动时显示桌面宠物",
             description="打开程序时自动显示桌面宠物。",
-            checked=True,
+            checked=bool(pet_config.get("show_on_startup", True)),
         )
+        self.connect_pet_startup_switches()
 
-        self.add_switch_row(
+        self.minimize_to_tray_switch = self.add_switch_row(
             container,
             title="关闭窗口时最小化到托盘",
             description="点击右上角关闭按钮时，程序继续在后台运行。",
-            checked=True,
+            checked=bool(general_config.get("minimize_to_tray_on_close", True)),
         )
 
-        self.add_switch_row(
+        self.confirm_before_exit_switch = self.add_switch_row(
             container,
             title="退出程序前确认",
             description="通过托盘菜单退出时弹出确认提示，避免误退。",
-            checked=True,
+            checked=bool(general_config.get("confirm_before_exit", True)),
         )
 
-        self.add_switch_row(
+        self.startup_data_guard_switch = self.add_switch_row(
             container,
             title="启动时自动检查数据安全",
             description="程序启动时检查数据库完整性，并在异常时提醒。",
-            checked=True,
+            checked=bool(general_config.get("check_data_guard_on_startup", True)),
         )
 
-        self.add_switch_row(
+        self.startup_daily_refresh_switch = self.add_switch_row(
             container,
             title="启动时自动执行每日刷新",
             description="打开程序时自动处理任务顺延、归档和习惯刷新。",
-            checked=True,
+            checked=bool(general_config.get("refresh_tasks_on_startup", True)),
         )
 
-        self.add_switch_row(
+        self.show_tray_messages_switch = self.add_switch_row(
             container,
             title="显示托盘提示",
             description="关闭主窗口、完成任务等操作后，在系统托盘显示简短提示。",
-            checked=True,
+            checked=bool(general_config.get("show_tray_messages", True)),
         )
 
-        self.add_switch_row(
-            container,
-            title="调试模式",
-            description="显示更多运行日志和调试信息，方便排查问题。",
-            checked=False,
-        )
+        # self.add_switch_row(
+        #     container,
+        #     title="调试模式",
+        #     description="显示更多运行日志和调试信息，方便排查问题。",
+        #     checked=False,
+        # )
 
         self.add_hint_card(
             container,
@@ -1067,16 +1082,66 @@ class SettingsDialog(QDialog):
         """
         print("TODO: 恢复默认设置")
 
+    def apply_auto_start_setting(self):
+        """
+        应用开机自启动设置。
+        """
+        if self.auto_start_switch is None:
+            return
+
+        enabled = self.auto_start_switch.isChecked()
+
+        try:
+            if enabled:
+                auto_start.enable_auto_start()
+            else:
+                auto_start.disable_auto_start()
+
+            # 同步托盘菜单里的“开机自启动”勾选状态
+            if (
+                self.main_window is not None
+                and hasattr(self.main_window, "tray_manager")
+                and self.main_window.tray_manager is not None
+                and hasattr(self.main_window.tray_manager, "auto_start_action")
+            ):
+                self.main_window.tray_manager.auto_start_action.setChecked(
+                    auto_start.is_auto_start_enabled()
+                )
+
+        except Exception as error:
+            QMessageBox.warning(
+                self,
+                "开机自启动设置失败",
+                f"设置开机自启动时出现错误：\n{error}"
+            )
+
+    def apply_general_settings(self):
+        """
+        应用常规设置。
+        """
+        if (
+            self.show_main_window_switch is None
+            or self.general_pet_startup_switch is None
+            or self.minimize_to_tray_switch is None
+            or self.confirm_before_exit_switch is None
+            or self.startup_data_guard_switch is None
+            or self.startup_daily_refresh_switch is None
+            or self.show_tray_messages_switch is None
+        ):
+            return
+
+        config_manager.update_general_config(
+            show_main_window_on_startup=self.show_main_window_switch.isChecked(),
+            minimize_to_tray_on_close=self.minimize_to_tray_switch.isChecked(),
+            confirm_before_exit=self.confirm_before_exit_switch.isChecked(),
+            check_data_guard_on_startup=self.startup_data_guard_switch.isChecked(),
+            refresh_tasks_on_startup=self.startup_daily_refresh_switch.isChecked(),
+            show_tray_messages=self.show_tray_messages_switch.isChecked(),
+        )
 
     def on_apply_settings(self):
         """
         应用设置但不关闭窗口。
-
-        当前已接入：
-            - 显示 / 隐藏桌面宠物
-            - 启动时显示宠物
-            - 宠物窗口置顶
-            - 宠物透明度
         """
         if (
             self.pet_visible_switch is None
@@ -1102,14 +1167,18 @@ class SettingsDialog(QDialog):
         if self.main_window is not None and hasattr(self.main_window, "apply_pet_settings_from_dialog"):
             self.main_window.apply_pet_settings_from_dialog()
 
-        print(
-            "已应用宠物设置："
-            f"visible={visible}, "
-            f"show_on_startup={show_on_startup}, "
-            f"always_on_top={always_on_top}, "
-            f"opacity={opacity}"
-        )
+        self.apply_auto_start_setting()
+        self.apply_general_settings()
 
+        # Debug 输出当前设置状态
+        # print(
+        #     "已应用设置："
+        #     f"visible={visible}, "
+        #     f"show_on_startup={show_on_startup}, "
+        #     f"always_on_top={always_on_top}, "
+        #     f"opacity={opacity}, "
+        #     f"auto_start={auto_start.is_auto_start_enabled()}"
+        # )
 
     def on_save_and_close(self):
         """
@@ -1666,6 +1735,29 @@ class SettingsDialog(QDialog):
             return None
 
         return self.main_window.pet_window
+
+    def connect_pet_startup_switches(self):
+        """
+        同步“常规设置”和“桌面宠物”里的启动显示宠物开关。
+        """
+        if self.general_pet_startup_switch is None:
+            return
+
+        if self.pet_startup_switch is None:
+            return
+
+        def sync_to_pet(checked):
+            if self.pet_startup_switch is not None:
+                if self.pet_startup_switch.isChecked() != checked:
+                    self.pet_startup_switch.setChecked(checked)
+
+        def sync_to_general(checked):
+            if self.general_pet_startup_switch is not None:
+                if self.general_pet_startup_switch.isChecked() != checked:
+                    self.general_pet_startup_switch.setChecked(checked)
+
+        self.general_pet_startup_switch.toggled.connect(sync_to_pet)
+        self.pet_startup_switch.toggled.connect(sync_to_general)
 
     def open_url(self, url):
         """
