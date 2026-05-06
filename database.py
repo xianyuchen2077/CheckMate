@@ -406,6 +406,36 @@ def mark_task_done_today(task_id):
     return is_new_checkin
 
 
+def undo_task_done_today(task_id):
+    """
+    撤销任务今天的打卡记录。
+
+    返回：
+        True：确实删除了一条今天的打卡记录
+        False：今天本来就没有打卡记录
+    """
+    today = get_today_string()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        DELETE FROM checkins
+        WHERE task_id = ?
+          AND checkin_date = ?
+    """, (task_id, today))
+
+    deleted = cursor.rowcount > 0
+
+    conn.commit()
+    conn.close()
+
+    if deleted:
+        refresh_integrity_after_db_change()
+
+    return deleted
+
+
 def get_today_stats():
     """
     获取今日任务统计。
@@ -880,47 +910,57 @@ def refresh_tasks_for_today():
     """
     每日刷新任务归属日期。
 
-    规则：
-        habit：
-            每天继续保留，task_date 更新为今天。
+    当前规则：
+        1. 所有未归档的 habit：
+            不管完成与否、不管暂停与否，都顺延到今天。
 
-        task + is_active = 0：
-            暂停中的一次性任务，不管是否完成，都顺延到今天。
+        2. 所有未归档且暂停中的项目：
+            包括 task 和 habit，都顺延到今天，并保持暂停状态。
 
-        task + is_active = 1 + 当前 task_date 已完成：
-            归档，不再进入今日任务。
+        3. 未归档、启用中的 task：
+            如果它在自己的 task_date 那天已经完成：
+                归档，不再顺延到今天。
+            如果它在自己的 task_date 那天没有完成：
+                顺延到今天，继续显示。
 
-        task + is_active = 1 + 当前 task_date 未完成：
-            顺延到今天。
+        4. 已归档任务：
+            跳过，不处理。
 
-        is_archived = 1：
-            已归档任务跳过。
+    注意：
+        每日刷新只更新 tasks.task_date / is_archived。
+        不会删除 checkins。
+        不会给今天自动创建 checkins。
+        因此，顺延到今天的任务在今天统一表现为“未完成”。
     """
     today = get_today_string()
 
     conn = get_connection()
     cursor = conn.cursor()
 
-    # 1. 习惯：每天更新 task_date 到今天
+    # 1. 所有 habit：无论启用 / 暂停，无论昨天是否完成，都顺延到今天。
     cursor.execute("""
         UPDATE tasks
         SET task_date = ?
-        WHERE task_type = 'habit'
-          AND is_archived = 0
+        WHERE is_archived = 0
+          AND task_type = 'habit'
           AND (
                 task_date IS NULL
                 OR task_date != ?
           )
     """, (today, today))
-    habit_updated_count = cursor.rowcount
+    habit_rolled_count = cursor.rowcount
 
-    # 2. 启用中的一次性任务：
-    #    如果它在自己的 task_date 已经完成，则归档
+    # 2. 启用中的一次性 task：
+    #    如果 task_date 是过去日期，且那一天已经完成，则归档。
+    #
+    #    注意：
+    #    只归档 is_active = 1 的 task。
+    #    暂停中的 task 即使完成过，也不归档，而是走下面的暂停顺延逻辑。
     cursor.execute("""
         UPDATE tasks
         SET is_archived = 1
-        WHERE task_type = 'task'
-          AND is_archived = 0
+        WHERE is_archived = 0
+          AND task_type = 'task'
           AND is_active = 1
           AND task_date IS NOT NULL
           AND task_date < ?
@@ -931,48 +971,67 @@ def refresh_tasks_for_today():
                   AND checkins.checkin_date = tasks.task_date
           )
     """, (today,))
-    archived_done_task_count = cursor.rowcount
+    task_archived_count = cursor.rowcount
 
-    # 3. 一次性任务顺延：
-    #    A. 暂停中的 task：无论完成没完成，都顺延
-    #    B. 启用中的 task：没完成才顺延
+    # 3. 暂停中的 task：
+    #    不管 task_date 那天是否完成，都顺延到今天，保持暂停。
+    #
+    #    habit 已经在第 1 步处理过，所以这里专门处理 task。
     cursor.execute("""
         UPDATE tasks
         SET task_date = ?,
             is_archived = 0
-        WHERE task_type = 'task'
-          AND is_archived = 0
+        WHERE is_archived = 0
+          AND task_type = 'task'
+          AND is_active = 0
           AND (
                 task_date IS NULL
                 OR task_date < ?
           )
+    """, (today, today))
+    paused_task_rolled_count = cursor.rowcount
+
+    # 4. 启用中、未完成的一次性 task：
+    #    如果 task_date 是过去日期，并且那一天没有完成，则顺延到今天。
+    cursor.execute("""
+        UPDATE tasks
+        SET task_date = ?,
+            is_archived = 0
+        WHERE is_archived = 0
+          AND task_type = 'task'
+          AND is_active = 1
           AND (
-                is_active = 0
-                OR NOT EXISTS (
-                    SELECT 1
-                    FROM checkins
-                    WHERE checkins.task_id = tasks.id
-                      AND checkins.checkin_date = tasks.task_date
-                )
+                task_date IS NULL
+                OR task_date < ?
+          )
+          AND NOT EXISTS (
+                SELECT 1
+                FROM checkins
+                WHERE checkins.task_id = tasks.id
+                  AND checkins.checkin_date = tasks.task_date
           )
     """, (today, today))
-    rolled_task_count = cursor.rowcount
+    unfinished_task_rolled_count = cursor.rowcount
 
     conn.commit()
     conn.close()
 
+    task_rolled_count = paused_task_rolled_count + unfinished_task_rolled_count
+
     changed_count = (
-        habit_updated_count
-        + archived_done_task_count
-        + rolled_task_count
+        habit_rolled_count
+        + task_archived_count
+        + task_rolled_count
     )
 
     if changed_count > 0:
         refresh_integrity_after_db_change()
 
     return {
-        "habit_updated": habit_updated_count,
-        "task_archived": archived_done_task_count,
-        "task_rolled": rolled_task_count,
+        "habit_updated": habit_rolled_count,
+        "task_archived": task_archived_count,
+        "task_rolled": task_rolled_count,
+        "paused_task_rolled": paused_task_rolled_count,
+        "unfinished_task_rolled": unfinished_task_rolled_count,
         "total_changed": changed_count,
     }

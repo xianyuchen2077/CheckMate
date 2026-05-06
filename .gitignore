@@ -6,6 +6,8 @@ build/
 release/
 *.spec
 
+test/
+
 data/*.db
 data/*.db-journal
 

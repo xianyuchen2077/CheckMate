@@ -73,9 +73,11 @@ class MainWindow(QMainWindow):
         if refresh_result["total_changed"] > 0:
             log_info(
                 "每日任务刷新："
-                f"习惯更新 {refresh_result['habit_updated']} 个，"
+                f"习惯顺延 {refresh_result['habit_updated']} 个，"
                 f"任务归档 {refresh_result['task_archived']} 个，"
-                f"任务顺延 {refresh_result['task_rolled']} 个"
+                f"任务顺延 {refresh_result['task_rolled']} 个，"
+                f"其中暂停任务顺延 {refresh_result.get('paused_task_rolled', 0)} 个，"
+                f"未完成任务顺延 {refresh_result.get('unfinished_task_rolled', 0)} 个"
             )
 
         self.data_guard_result = run_startup_data_guard()
@@ -406,7 +408,6 @@ class MainWindow(QMainWindow):
             item.setData(1000, task_id)
             item.setData(1001, is_done_today)
             item.setData(1002, is_active)
-
             # 保存重复提醒间隔，后面完成任务时用它判断是否是周期任务
             item.setData(1003, repeat_interval_minutes)
 
@@ -416,14 +417,18 @@ class MainWindow(QMainWindow):
 
         self.update_stats()
         self.update_task_detail()
+        self.update_complete_button_text()
 
     def update_task_detail(self):
         if not hasattr(self, "detail_name"):
             return
 
+        self.update_complete_button_text()
+
         current_item = self.task_list.currentItem()
 
         if current_item is None:
+            self.complete_btn.setText("完成打卡")
             self.detail_name.setText("任务名称：未选择")
             self.detail_time.setText("提醒时间：-")
             self.detail_active.setText("任务状态：-")
@@ -447,7 +452,7 @@ class MainWindow(QMainWindow):
 
         # 记录“今天这个重复任务至少完成过一次”
         # 即使重复任务一天完成多轮，checkins 表里也只需要有一条当天记录
-        database.mark_task_done_today(task_id)
+        # database.mark_task_done_today(task_id)
 
         title = task["title"]
         remind_time = task["remind_time"] or "未设置"
@@ -477,6 +482,39 @@ class MainWindow(QMainWindow):
         self.detail_active.setText(f"任务状态：{active_text}")
         self.detail_today.setText(f"今日状态：{today_text}")
         self.detail_description.setText(f"备注说明：{description}")
+
+    def update_complete_button_text(self):
+        """
+        根据当前选中的任务状态，更新打卡按钮文字。
+
+        规则：
+            1. 没有选中任务：显示“完成打卡”
+            2. 重复提醒任务：始终显示“完成打卡”
+            因为它允许提前完成下一轮
+            3. 普通任务 / 普通习惯：
+            未完成：显示“完成打卡”
+            已完成：显示“撤销打卡”
+        """
+        if not hasattr(self, "complete_btn"):
+            return
+
+        current_item = self.task_list.currentItem()
+
+        if current_item is None:
+            self.complete_btn.setText("完成打卡")
+            return
+
+        is_done_today = current_item.data(1001)
+        repeat_interval_minutes = current_item.data(1003)
+
+        if self.is_repeat_task(repeat_interval_minutes):
+            self.complete_btn.setText("完成打卡")
+            return
+
+        if is_done_today:
+            self.complete_btn.setText("撤销打卡")
+        else:
+            self.complete_btn.setText("完成打卡")
 
     def add_task(self):
         dialog = AddTaskDialog(self)
@@ -593,20 +631,23 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "这个任务已暂停，不能打卡。")
             return
 
-        # 周期性任务：不调用 database.mark_task_done_today()
+        # 重复提醒任务：始终表示“完成本轮 / 提前完成”
+        # 不进入撤销逻辑
         if self.is_repeat_task(repeat_interval_minutes):
             self.complete_repeat_task(task_id)
             return
 
-        # 普通任务：沿用每日打卡逻辑
+        # 普通任务 / 普通习惯：
+        # 已完成时，按钮含义是“撤销打卡”
         if is_done_today:
-            QMessageBox.information(self, "提示", "这个任务今天已经完成打卡了。")
+            self.undo_task_checkin(task_id)
             return
 
         is_new_checkin = database.mark_task_done_today(task_id)
 
         if not is_new_checkin:
             QMessageBox.information(self, "提示", "这个任务今天已经完成打卡了。")
+            self.load_tasks()
             return
 
         task = database.get_task_by_id(task_id)
@@ -619,6 +660,14 @@ class MainWindow(QMainWindow):
 
         self.load_tasks()
 
+        # 尝试重新选中刚刚完成的任务
+        for row in range(self.task_list.count()):
+            item = self.task_list.item(row)
+
+            if item.data(1000) == task_id:
+                self.task_list.setCurrentItem(item)
+                break
+
         if hasattr(self, "pet_window"):
             self.pet_window.refresh_growth_info()
             self.pet_window.set_done()
@@ -628,12 +677,12 @@ class MainWindow(QMainWindow):
 
     def complete_repeat_task(self, task_id):
         """
-        完成一次周期性任务。
+        完成一次周期性 / 重复提醒任务。
 
-        注意：
-            周期性任务不调用 database.mark_task_done_today(task_id)
-            因为它不是“今天完成一次就结束”的任务。
-            它只是表示“本轮提醒已完成”，后续仍然会继续重复提醒。
+        规则：
+            1. 重复提醒任务允许一天完成多轮。
+            2. checkins 表中每天至少记录一条，用于统计和每日刷新。
+            3. 如果当前任务有稍后提醒或重复提醒计时器，提前完成后要重新安排下一轮。
         """
         task = database.get_task_by_id(task_id)
 
@@ -646,14 +695,16 @@ class MainWindow(QMainWindow):
         remind_time = task["remind_time"]
         repeat_interval_minutes = task["repeat_interval_minutes"]
 
+        # 重复提醒任务：记录今天至少完成过一次。
+        # INSERT OR IGNORE 会保证同一天不会重复插入多条 checkin。
+        database.mark_task_done_today(task_id)
+
         growth_result = pet_growth.add_exp_for_completed_task(task)
 
         if growth_result is not None:
             self.tip_label.setText(growth_result["message"])
         else:
             self.tip_label.setText(f"本次周期任务已完成：{title}")
-
-        self.load_tasks()
 
         if hasattr(self, "pet_window"):
             self.pet_window.refresh_growth_info()
@@ -670,13 +721,76 @@ class MainWindow(QMainWindow):
         if growth_result is not None:
             self.show_pet_growth_dialog(growth_result)
 
-        # 如果提醒管理器已经启动，则继续安排下一次周期提醒
+        # 提前完成后，重新安排下一次重复提醒。
+        # schedule_repeat_if_needed 内部已经会取消旧的重复提醒 timer，
+        # 避免旧提醒和新提醒同时存在。
         if hasattr(self, "reminder_manager") and self.reminder_manager is not None:
             self.reminder_manager.schedule_repeat_if_needed(
                 task_id,
                 title,
                 remind_time,
                 repeat_interval_minutes
+            )
+
+        self.load_tasks()
+
+        # 尝试重新选中刚刚完成的任务
+        for row in range(self.task_list.count()):
+            item = self.task_list.item(row)
+
+            if item.data(1000) == task_id:
+                self.task_list.setCurrentItem(item)
+                break
+
+    def undo_task_checkin(self, task_id):
+        """
+        撤销当前选中任务今天的打卡记录。
+        """
+        task = database.get_task_by_id(task_id)
+
+        if task is None:
+            QMessageBox.warning(self, "错误", "没有找到这个任务，可能已经被删除。")
+            self.load_tasks()
+            return
+
+        title = task["title"]
+
+        reply = QMessageBox.question(
+            self,
+            "确认撤销",
+            f"确定要撤销「{title}」的打卡吗？🐟",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        undone = database.undo_task_done_today(task_id)
+
+        if not undone:
+            QMessageBox.information(self, "提示", "这个任务今天没有可撤销的打卡记录。")
+            self.load_tasks()
+            return
+
+        self.tip_label.setText(f"已撤销打卡：{title}")
+
+        self.load_tasks()
+
+        # 尝试重新选中刚刚撤销的任务
+        for row in range(self.task_list.count()):
+            item = self.task_list.item(row)
+
+            if item.data(1000) == task_id:
+                self.task_list.setCurrentItem(item)
+                break
+
+        if hasattr(self, "tray_manager") and self.tray_manager is not None:
+            self.tray_manager.show_message(
+                "CheckMate",
+                f"已撤销打卡：{title}",
+                3000,
+                icon_type="warning"
             )
 
     def toggle_task_active(self):
@@ -871,9 +985,11 @@ class MainWindow(QMainWindow):
         if refresh_result["total_changed"] > 0:
             log_info(
                 "每日任务刷新："
-                f"习惯更新 {refresh_result['habit_updated']} 个，"
+                f"习惯顺延 {refresh_result['habit_updated']} 个，"
                 f"任务归档 {refresh_result['task_archived']} 个，"
-                f"任务顺延 {refresh_result['task_rolled']} 个"
+                f"任务顺延 {refresh_result['task_rolled']} 个，"
+                f"其中暂停任务顺延 {refresh_result.get('paused_task_rolled', 0)} 个，"
+                f"未完成任务顺延 {refresh_result.get('unfinished_task_rolled', 0)} 个"
             )
 
         if hasattr(self, "reminder_manager") and self.reminder_manager is not None:
