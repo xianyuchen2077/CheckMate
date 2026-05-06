@@ -1,4 +1,8 @@
-from PySide6.QtCore import Qt
+import shutil
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QUrl, QSize
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -14,9 +18,35 @@ from PySide6.QtWidgets import (
     QWidget,
     QComboBox,
     QMessageBox,
+    QFileDialog,
 )
 
+import database
 import config_manager
+
+from data_guard.paths import (
+    get_user_data_root_dir,
+    ensure_data_guard_dirs,
+    get_database_dir,
+    get_database_path,
+    get_backup_dir,
+)
+
+from data_guard.backup_manager import (
+    AUTO_BACKUP_PREFIX,
+    MAX_AUTO_BACKUPS,
+    create_manual_backup,
+    restore_from_latest_auto_backup,
+    restore_database_from_backup,
+    list_backups,
+    cleanup_backups_by_count,
+    cleanup_suspicious_backups,
+)
+
+from data_guard.integrity_manager import (
+    check_integrity,
+    trust_current_database,
+)
 
 class SettingsDialog(QDialog):
     """
@@ -43,6 +73,13 @@ class SettingsDialog(QDialog):
         self.pet_startup_switch = None
         self.pet_top_switch = None
         self.pet_opacity_slider = None
+
+        # 数据管理页面标签引用
+        self.data_file_label = None
+        self.backup_folder_label = None
+        self.latest_backup_label = None
+        self.database_status_label = None
+        self.backup_count_label = None
 
         self.setWindowTitle("设置 - CheckMate")
         self.setFixedSize(780, 540)
@@ -76,8 +113,13 @@ class SettingsDialog(QDialog):
 
         self.nav_list = QListWidget()
         self.nav_list.setObjectName("settingsNav")
-        self.nav_list.setSpacing(4)
+        self.nav_list.setSpacing(6)
         self.nav_list.setFrameShape(QFrame.Shape.NoFrame)
+
+        # 左侧导航项目不多，固定高度后不需要滚动条
+        self.nav_list.setFixedHeight(400)
+        self.nav_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.nav_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         nav_items = [
             "常规设置",
@@ -91,6 +133,7 @@ class SettingsDialog(QDialog):
         for text in nav_items:
             item = QListWidgetItem(text)
             item.setSizeHint(item.sizeHint())
+            # item.setSizeHint(QSize(140, 42))
             self.nav_list.addItem(item)
 
         self.nav_list.currentRowChanged.connect(self.switch_page)
@@ -161,6 +204,10 @@ class SettingsDialog(QDialog):
             return
 
         self.page_stack.setCurrentIndex(index)
+
+        # 数据管理页索引是 3
+        if index == 3:
+            self.refresh_data_management_info()
 
     # =========================
     # 页面创建
@@ -477,49 +524,49 @@ class SettingsDialog(QDialog):
 
         container = page.findChild(QWidget, "pageContent")
 
-        self.add_info_row(
+        self.data_file_label = self.add_info_row(
             container,
             title="当前数据文件",
-            value="%LOCALAPPDATA%\\CheckMate\\data\\checkmate.db",
+            value="读取中...",
         )
 
-        self.add_info_row(
+        self.backup_folder_label = self.add_info_row(
             container,
             title="备份文件夹",
-            value="%LOCALAPPDATA%\\CheckMate\\data_backups\\",
+            value="读取中...",
         )
 
-        self.add_info_row(
+        self.latest_backup_label = self.add_info_row(
             container,
             title="最近备份",
-            value="后续接入 backup_manager 后显示",
+            value="读取中...",
         )
 
-        self.add_info_row(
+        self.database_status_label = self.add_info_row(
             container,
             title="数据库状态",
-            value="后续接入 integrity_manager 后显示：正常 / 可疑 / 需要恢复",
+            value="读取中...",
         )
 
-        self.add_info_row(
+        self.backup_count_label = self.add_info_row(
             container,
-            title="自动备份数量",
-            value="后续接入 backup_manager 后显示",
+            title="备份数量",
+            value="读取中...",
         )
 
         self.add_switch_row(
             container,
             title="启动时自动备份",
-            description="程序启动时自动备份当前数据库。",
+            description="程序启动时自动备份当前数据库。当前版本暂时保留为 UI 设置项，实际启动流程仍以 data_guard 为准。",
             checked=True,
         )
 
         self.add_combo_row(
             container,
             title="自动备份保留数量",
-            description="超过数量后可清理较旧的自动备份。",
+            description="超过数量后可清理较旧的自动备份。当前底层默认保留最近 5 个自动备份。",
             items=["保留 5 个", "保留 10 个", "保留 20 个", "不自动清理"],
-            current_index=1,
+            current_index=0,
         )
 
         folder_buttons = self.create_button_row(
@@ -538,21 +585,21 @@ class SettingsDialog(QDialog):
 
         export_buttons = self.create_button_row(
             title="导入 / 导出",
-            description="导出当前数据，或从外部备份文件导入数据。后续接入真实逻辑。",
+            description="导出当前数据，或从外部 .db 文件导入数据。导入前会自动备份当前数据库。",
             buttons=["导出数据", "导入数据"],
         )
         self.add_to_container(container, export_buttons)
 
         cleanup_buttons = self.create_button_row(
             title="清理",
-            description="清理旧备份和临时可疑备份。后续接入真实逻辑。",
+            description="清理旧自动备份或过期可疑备份。",
             buttons=["清理旧备份", "清理可疑备份"],
         )
         self.add_to_container(container, cleanup_buttons)
 
         danger_buttons = self.create_button_row(
             title="危险操作",
-            description="恢复备份和信任数据库需要二次确认，后续再接入真实逻辑。",
+            description="恢复备份和信任数据库会影响数据安全状态，操作前会二次确认。",
             buttons=["从最近备份恢复", "信任当前数据库"],
             danger=True,
         )
@@ -561,8 +608,10 @@ class SettingsDialog(QDialog):
         self.add_hint_card(
             container,
             "安全提示",
-            "数据管理页面涉及正式数据库。第一版建议先实现打开文件夹和立即备份，恢复与信任操作后续再接入。"
+            "恢复、导入、信任数据库属于高风险操作。建议操作前先确认当前数据状态，必要时先手动备份。"
         )
+
+        self.refresh_data_management_info()
 
         return page
 
@@ -1070,12 +1119,6 @@ class SettingsDialog(QDialog):
     def on_placeholder_button_clicked(self, action):
         """
         设置页按钮点击事件。
-
-        当前已接入：
-            - 回到右下角
-            - 重置宠物位置
-
-        其他按钮暂时保留 TODO。
         """
         if action == "回到右下角":
             self.move_pet_to_bottom_right()
@@ -1085,7 +1128,466 @@ class SettingsDialog(QDialog):
             self.reset_pet_position()
             return
 
+        if action == "打开数据文件夹":
+            self.open_data_folder()
+            return
+
+        if action == "打开备份文件夹":
+            self.open_backup_folder()
+            return
+
+        if action == "立即备份":
+            self.create_manual_database_backup()
+            return
+
+        if action == "从最近备份恢复":
+            self.restore_latest_database_backup()
+            return
+
+        if action == "信任当前数据库":
+            self.trust_current_database_from_settings()
+            return
+
+        if action == "导出数据":
+            self.export_database()
+            return
+
+        if action == "导入数据":
+            self.import_database()
+            return
+
+        if action == "清理旧备份":
+            self.cleanup_old_auto_backups_from_settings()
+            return
+
+        if action == "清理可疑备份":
+            self.cleanup_suspicious_backups_from_settings()
+            return
+
         print(f"TODO: 设置按钮点击：{action}")
+
+    def open_folder(self, folder_path):
+        """
+        打开指定文件夹。
+        如果文件夹不存在，就先创建。
+        """
+        folder_path.mkdir(parents=True, exist_ok=True)
+
+        QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(folder_path))
+        )
+
+    def open_data_folder(self):
+        """
+        打开 CheckMate 数据文件夹。
+        """
+        data_dir = get_database_dir()
+        self.open_folder(data_dir)
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("已打开数据文件夹。")
+
+
+    def open_backup_folder(self):
+        """
+        打开 CheckMate 备份文件夹。
+        """
+        backup_dir = get_backup_dir()
+        self.open_folder(backup_dir)
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("已打开备份文件夹。")
+
+    def get_latest_backup_text(self):
+        """
+        获取最近备份文件显示文本。
+        """
+        backups = list_backups()
+
+        if not backups:
+            return "暂无备份"
+
+        latest = backups[0]
+        return str(latest)
+
+
+    def get_backup_count_text(self):
+        """
+        获取备份数量显示文本。
+        """
+        auto_count = len(list_backups("auto"))
+        manual_count = len(list_backups("manual"))
+        suspicious_count = len(list_backups("suspicious"))
+        before_restore_count = len(list_backups("before_restore"))
+
+        return (
+            f"自动备份：{auto_count} 个；"
+            f"手动备份：{manual_count} 个；"
+            f"可疑备份：{suspicious_count} 个；"
+            f"恢复前备份：{before_restore_count} 个"
+        )
+
+
+    def get_database_status_text(self):
+        """
+        获取数据库完整性状态显示文本。
+        """
+        result = check_integrity()
+
+        status_value = result.get("status")
+        message_value = result.get("message", "")
+
+        if status_value is None:
+            status_key = "unknown"
+        else:
+            status_key = str(status_value)
+
+        message = str(message_value)
+
+        status_map = {
+            "ok": "正常",
+            "missing_record": "缺少完整性记录",
+            "db_missing": "数据库不存在",
+            "changed": "可能被外部修改",
+            "unknown": "未知",
+        }
+
+        status_text = status_map.get(status_key, status_key)
+
+        return f"{status_text}：{message}"
+
+
+    def set_label_value(self, label, value):
+        """
+        安全设置 QLabel 文本。
+        """
+        if label is not None:
+            label.setText(str(value))
+
+
+    def refresh_data_management_info(self):
+        """
+        刷新数据管理页面的路径、备份和完整性状态。
+        """
+        ensure_data_guard_dirs()
+
+        self.set_label_value(
+            self.data_file_label,
+            get_database_path()
+        )
+
+        self.set_label_value(
+            self.backup_folder_label,
+            get_backup_dir()
+        )
+
+        self.set_label_value(
+            self.latest_backup_label,
+            self.get_latest_backup_text()
+        )
+
+        self.set_label_value(
+            self.database_status_label,
+            self.get_database_status_text()
+        )
+
+        self.set_label_value(
+            self.backup_count_label,
+            self.get_backup_count_text()
+        )
+
+
+    def create_manual_database_backup(self):
+        """
+        立即创建手动数据库备份。
+        """
+        backup_path = create_manual_backup()
+
+        if backup_path is None:
+            QMessageBox.warning(
+                self,
+                "备份失败",
+                "当前数据库不存在或为空，无法创建备份。"
+            )
+            return
+
+        self.refresh_data_management_info()
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("已创建手动数据库备份。")
+
+        QMessageBox.information(
+            self,
+            "备份成功",
+            f"已创建手动备份：\n{backup_path}"
+        )
+
+
+    def refresh_main_window_after_database_restore(self):
+        """
+        恢复或导入数据库后，刷新主窗口状态。
+        """
+        try:
+            database.init_db()
+        except Exception as error:
+            print(f"恢复后初始化数据库失败：{error}")
+
+        if self.main_window is None:
+            return
+
+        if hasattr(self.main_window, "load_tasks"):
+            self.main_window.load_tasks()
+
+        if hasattr(self.main_window, "update_pet_progress"):
+            self.main_window.update_pet_progress()
+
+        if hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("数据库已恢复，界面已刷新。")
+
+
+    def restore_latest_database_backup(self):
+        """
+        从最近一次自动备份恢复数据库。
+        """
+        reply = QMessageBox.question(
+            self,
+            "确认恢复",
+            (
+                "确定要从最近一次自动备份恢复数据库吗？🐟\n\n"
+                "恢复前会自动备份当前数据库。\n"
+                "恢复后会刷新完整性记录。\n\n"
+                "如果你不确定，请先取消。"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        result = restore_from_latest_auto_backup()
+
+        if not result.get("success"):
+            QMessageBox.warning(
+                self,
+                "恢复失败",
+                result.get("message", "没有成功恢复数据库。")
+            )
+            return
+
+        trust_current_database()
+        self.refresh_main_window_after_database_restore()
+        self.refresh_data_management_info()
+
+        QMessageBox.information(
+            self,
+            "恢复成功",
+            (
+                f"{result.get('message')}\n\n"
+                f"恢复来源：\n{result.get('backup_path')}\n\n"
+                f"恢复前备份：\n{result.get('before_restore_backup')}"
+            )
+        )
+
+
+    def trust_current_database_from_settings(self):
+        """
+        信任当前数据库，并刷新完整性记录。
+        """
+        reply = QMessageBox.question(
+            self,
+            "确认信任当前数据库",
+            (
+                "确定要信任当前数据库吗？⚠️\n\n"
+                "这会刷新完整性记录。\n"
+                "如果当前数据库已经损坏或被错误修改，之后程序可能不再提醒你。\n\n"
+                "请仅在你确认当前数据没有问题时使用。"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        info = trust_current_database()
+
+        self.refresh_data_management_info()
+
+        if info is None:
+            QMessageBox.warning(
+                self,
+                "操作失败",
+                "当前数据库不存在，无法刷新完整性记录。"
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "已信任当前数据库",
+            f"完整性记录已刷新：\n{info.get('updated_at')}"
+        )
+
+
+    def export_database(self):
+        """
+        导出当前数据库到用户指定位置。
+        """
+        db_path = get_database_path()
+
+        if not db_path.exists():
+            QMessageBox.warning(
+                self,
+                "导出失败",
+                "当前数据库文件不存在。"
+            )
+            return
+
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出数据库",
+            "checkmate_export.db",
+            "SQLite 数据库 (*.db)"
+        )
+
+        if not save_path:
+            return
+
+        if not save_path.lower().endswith(".db"):
+            save_path += ".db"
+
+        try:
+            shutil.copy2(db_path, save_path)
+        except OSError as error:
+            QMessageBox.warning(
+                self,
+                "导出失败",
+                f"导出数据库失败：\n{error}"
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "导出成功",
+            f"数据库已导出到：\n{save_path}"
+        )
+
+
+    def import_database(self):
+        """
+        从用户选择的 .db 文件导入数据库。
+        """
+        import_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "导入数据库",
+            "",
+            "SQLite 数据库 (*.db)"
+        )
+
+        if not import_path:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "确认导入",
+            (
+                "确定要导入这个数据库吗？⚠️\n\n"
+                "导入会覆盖当前正式数据库。\n"
+                "导入前会自动备份当前数据库。\n"
+                "导入后会刷新完整性记录。\n\n"
+                f"导入文件：\n{import_path}"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        result = restore_database_from_backup(Path(import_path))
+
+        if not result.get("success"):
+            QMessageBox.warning(
+                self,
+                "导入失败",
+                result.get("message", "导入数据库失败。")
+            )
+            return
+
+        trust_current_database()
+        self.refresh_main_window_after_database_restore()
+        self.refresh_data_management_info()
+
+        QMessageBox.information(
+            self,
+            "导入成功",
+            (
+                "数据库已导入并设为可信状态。\n\n"
+                f"导入来源：\n{result.get('backup_path')}\n\n"
+                f"导入前备份：\n{result.get('before_restore_backup')}"
+            )
+        )
+
+
+    def cleanup_old_auto_backups_from_settings(self):
+        """
+        清理旧自动备份，只保留最近 MAX_AUTO_BACKUPS 个。
+        """
+        reply = QMessageBox.question(
+            self,
+            "确认清理旧备份",
+            (
+                f"确定要清理旧自动备份吗？\n\n"
+                f"当前规则：只保留最近 {MAX_AUTO_BACKUPS} 个自动备份。"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        deleted_count = cleanup_backups_by_count(
+            AUTO_BACKUP_PREFIX,
+            MAX_AUTO_BACKUPS
+        )
+
+        self.refresh_data_management_info()
+
+        QMessageBox.information(
+            self,
+            "清理完成",
+            f"已清理旧自动备份 {deleted_count} 个。"
+        )
+
+
+    def cleanup_suspicious_backups_from_settings(self):
+        """
+        清理过期或超数量的可疑备份。
+        """
+        reply = QMessageBox.question(
+            self,
+            "确认清理可疑备份",
+            (
+                "确定要清理可疑备份吗？\n\n"
+                "会删除过期的 suspicious 备份，并只保留最近少量可疑备份。"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        deleted_count = cleanup_suspicious_backups()
+
+        self.refresh_data_management_info()
+
+        QMessageBox.information(
+            self,
+            "清理完成",
+            f"已清理可疑备份 {deleted_count} 个。"
+        )
 
     def move_pet_to_bottom_right(self):
         """
