@@ -60,6 +60,10 @@ class PetWindow(QWidget):
         self.pet_easter_first_click_time = None
         self.is_pet_easter_mode = False
 
+        # 超级赛亚人彩蛋：
+        self.is_super_fish_mode = False
+        self.super_fish_finished_callback = None
+
         self.setMouseTracking(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
@@ -366,9 +370,12 @@ class PetWindow(QWidget):
             "sleep": candidates("pet_sleep"),
 
             # 彩蛋状态
+            # 宠物连击彩蛋
             "tired": candidates("tired") + candidates("pet_lazy"),
             "unconscious": candidates("unconscious") + candidates("pet_sleep") + candidates("pet_lazy"),
             "dead": candidates("dead") + candidates("pet_dead_fish") + candidates("pet_sleep") + candidates("pet_lazy"),
+            # 超级赛亚人彩蛋
+            "super_fish": candidates("Super_Saiyan") + candidates("pet_done") + candidates("pet_idle"),
         }
 
     def switch_skin(self, skin_name):
@@ -415,6 +422,9 @@ class PetWindow(QWidget):
             return
 
         if getattr(self, "is_pet_easter_mode", False):
+            return
+
+        if getattr(self, "is_super_fish_mode", False):
             return
 
         self.say_random_idle_message()
@@ -666,6 +676,74 @@ class PetWindow(QWidget):
         self.is_pet_easter_mode = False
         self.is_status_locked = False
         self.set_idle()
+
+    def set_konami_flash_on(self):
+        """
+        Konami Code 彩蛋闪烁：亮起。
+        """
+        self.container.setStyleSheet("""
+            #petContainer {
+                background-color: rgba(255, 247, 237, 220);
+                border: 2px solid #f97316;
+                border-radius: 18px;
+            }
+        """)
+
+        self.setWindowOpacity(1.0)
+
+    def set_konami_flash_off(self):
+        """
+        Konami Code 彩蛋闪烁：恢复。
+        """
+        self.container.setStyleSheet("""
+            #petContainer {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+
+        pet_config = config_manager.get_pet_config()
+        opacity = float(pet_config.get("opacity", 1.0))
+        self.setWindowOpacity(opacity)
+
+    def enter_super_fish_mode(self, on_finished=None):
+        """
+        Konami Code 彩蛋：超级咸鱼模式。
+        闪烁结束后切换到 super_fish 图片。
+        """
+        if getattr(self, "is_reminding", False):
+            if on_finished is not None:
+                on_finished()
+            return
+
+        self.is_super_fish_mode = True
+        self.is_status_locked = True
+        self.is_reminding = False
+        self.super_fish_finished_callback = on_finished
+
+        self.set_text_color("#f97316")
+        self.load_pet_image("super_fish")
+        self.pet_text.setText("你输入了古老的咒语，鱼开始发光。")
+
+        QTimer.singleShot(5 * 1000, self.exit_super_fish_mode)
+
+    def exit_super_fish_mode(self):
+        """
+        退出超级咸鱼模式。
+        """
+        self.is_super_fish_mode = False
+        self.is_status_locked = False
+
+        # 超级赛亚鱼结束后，关闭宠物发光效果
+        self.set_konami_flash_off()
+
+        self.set_idle()
+
+        callback = getattr(self, "super_fish_finished_callback", None)
+        self.super_fish_finished_callback = None
+
+        if callback is not None:
+            callback()
 
     def set_progress(self, done, total):
         self.is_reminding = False

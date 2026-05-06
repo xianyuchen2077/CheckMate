@@ -1,8 +1,8 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtGui import QColor, QFont, QIcon, QDesktopServices
-from PySide6.QtCore import QUrl, QTimer
+from PySide6.QtGui import QColor, QFont, QIcon, QDesktopServices, QKeySequence
+from PySide6.QtCore import QUrl, QTimer, Qt, QEvent
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -97,8 +97,38 @@ class MainWindow(QMainWindow):
 
         self.force_quit = False
 
+        self.konami_code = [
+            Qt.Key.Key_Up,
+            Qt.Key.Key_Up,
+            Qt.Key.Key_Down,
+            Qt.Key.Key_Down,
+            Qt.Key.Key_Left,
+            Qt.Key.Key_Right,
+            Qt.Key.Key_Left,
+            Qt.Key.Key_Right,
+            Qt.Key.Key_B,
+            Qt.Key.Key_A,
+            Qt.Key.Key_B,
+            Qt.Key.Key_A,
+        ]
+
+        self.konami_input_buffer = []
+        self.konami_input_index = 0
+        self.konami_flash_original_style = ""
+        self.konami_flash_count = 0
+
+        # Konami Code 彩蛋输入开关：
+        # 只有先点击主窗口标题后，才开始记录键盘输入
+        self.konami_armed = False
+        self.konami_arm_timer = None
+
         self.init_ui()
         self.apply_styles()
+
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
         self.load_tasks()
 
         self.tray_manager = TrayManager(self)
@@ -134,13 +164,15 @@ class MainWindow(QMainWindow):
         left_panel = QVBoxLayout()
         left_panel.setSpacing(15)
 
-        title_label = QLabel("CheckMate")
-        title_label.setObjectName("titleLabel")
+        self.title_label = QLabel("CheckMate")
+        self.title_label.setObjectName("titleLabel")
+        self.title_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.title_label.mousePressEvent = self.arm_konami_easter_egg
 
         subtitle_label = QLabel("不要成为咸鱼 · 你的桌面打卡督促助手")
         subtitle_label.setObjectName("subtitleLabel")
 
-        left_panel.addWidget(title_label)
+        left_panel.addWidget(self.title_label)
         left_panel.addWidget(subtitle_label)
 
         task_card = QFrame()
@@ -1092,3 +1124,250 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "pet_window"):
             self.pet_window.refresh_growth_info()
+
+    def eventFilter(self, watched, event):
+        """
+        全局监听当前应用内的按键事件，用于 Konami Code 彩蛋。
+
+        只有先点击主窗口标题 “CheckMate” 后，才会开始记录按键。
+        """
+        if event.type() == QEvent.Type.KeyPress:
+            if self.konami_armed:
+                if event.isAutoRepeat():
+                    return True
+
+                self.handle_konami_key(event.key())
+                return True
+
+        return super().eventFilter(watched, event)
+
+    def get_key_display_name(self, key):
+        """
+        把 Qt key 转成人能看懂的显示文本。
+        """
+        key_name_map = {
+            Qt.Key.Key_Up: "↑",
+            Qt.Key.Key_Down: "↓",
+            Qt.Key.Key_Left: "←",
+            Qt.Key.Key_Right: "→",
+            Qt.Key.Key_A: "A",
+            Qt.Key.Key_B: "B",
+        }
+
+        return key_name_map.get(key, str(key))
+
+    def arm_konami_easter_egg(self, event):
+        """
+        鼠标点击主窗口标题后，开启 Konami Code 输入窗口。
+
+        规则：
+            点击标题 “CheckMate”
+            10 秒内输入 ↑ ↑ ↓ ↓ ← → ← → B A
+        """
+        self.konami_armed = True
+        self.konami_input_buffer.clear()
+        self.konami_input_index = 0
+
+        target_text = " ".join(
+            self.get_key_display_name(key)
+            for key in self.konami_code
+        )
+
+        self.tip_label.setText(
+            f"古老咒语输入模式已开启：10 秒内输入 {target_text}"
+        )
+
+        print("[Konami Debug] 输入模式已开启")
+        print(f"[Konami Debug] 目标序列：{target_text}")
+
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+
+        if self.konami_arm_timer is not None:
+            self.konami_arm_timer.stop()
+            self.konami_arm_timer.deleteLater()
+
+        self.konami_arm_timer = QTimer(self)
+        self.konami_arm_timer.setSingleShot(True)
+        self.konami_arm_timer.timeout.connect(self.disarm_konami_easter_egg)
+        self.konami_arm_timer.start(10 * 1000)
+
+        event.accept()
+
+    def disarm_konami_easter_egg(self):
+        """
+        关闭 Konami Code 输入状态。
+        """
+        self.konami_armed = False
+        self.konami_input_buffer.clear()
+        self.konami_input_index = 0
+
+        if self.konami_arm_timer is not None:
+            self.konami_arm_timer.stop()
+            self.konami_arm_timer.deleteLater()
+            self.konami_arm_timer = None
+
+    def handle_konami_key(self, key):
+        """
+        逐位处理 Konami Code 输入：
+            ↑ ↑ ↓ ↓ ← → ← → B A
+        """
+        if not self.konami_armed:
+            return
+
+        expected_key = self.konami_code[self.konami_input_index]
+
+        key_name = self.get_key_display_name(key)
+        expected_name = self.get_key_display_name(expected_key)
+
+        print(
+            f"[Konami Debug] 当前按键：{key_name} / "
+            f"期望按键：{expected_name} / "
+            f"当前进度：{self.konami_input_index}/{len(self.konami_code)}"
+        )
+
+        if key != expected_key:
+            print("[Konami Debug] 输入错误，咒语取消。")
+            self.disarm_konami_easter_egg()
+            self.tip_label.setText(
+                f"古老咒语输入失败：刚刚按了 {key_name}，但需要 {expected_name}。"
+            )
+            return
+
+        self.konami_input_buffer.append(key)
+        self.konami_input_index += 1
+
+        progress = self.konami_input_index
+        total = len(self.konami_code)
+
+        readable_buffer = " ".join(
+            self.get_key_display_name(buffer_key)
+            for buffer_key in self.konami_input_buffer
+        )
+
+        print(f"[Konami Debug] 已输入：{readable_buffer}")
+        print(f"[Konami Debug] 进度：{progress}/{total}")
+
+        if self.konami_input_index >= len(self.konami_code):
+            print("[Konami Debug] Konami Code 匹配成功，触发彩蛋。")
+            self.disarm_konami_easter_egg()
+            self.trigger_konami_easter_egg()
+            return
+
+        next_key = self.konami_code[self.konami_input_index]
+        next_name = self.get_key_display_name(next_key)
+
+        self.tip_label.setText(
+            f"古老咒语输入中：{progress} / {total}，下一个：{next_name}"
+        )
+
+    def trigger_konami_easter_egg(self):
+        """
+        触发 Konami Code 彩蛋。
+        """
+        self.tip_label.setText("古老咒语生效中……")
+
+        if hasattr(self, "tray_manager") and self.tray_manager is not None:
+            self.tray_manager.show_message(
+                "隐藏彩蛋触发",
+                "古老咒语生效中……",
+                3000,
+                icon_type="success"
+            )
+
+        self.start_konami_flash()
+
+    def start_konami_flash(self):
+        """
+        Konami Code 触发后，让主窗口和宠物窗口闪烁。
+        闪烁完成后，再切换宠物特殊状态。
+        """
+        self.konami_flash_original_style = self.styleSheet() or ""
+        self.konami_flash_count = 0
+
+        self.run_konami_flash_step()
+
+    def run_konami_flash_step(self):
+        """
+        执行一次闪烁步骤。
+        """
+        max_flash_steps = 6  # 亮/灭算一步，6 步约等于闪 3 次
+
+        if self.konami_flash_count >= max_flash_steps:
+            self.finish_konami_flash()
+            return
+
+        is_on = self.konami_flash_count % 2 == 0
+        base_style = self.konami_flash_original_style or ""
+
+        if is_on:
+            self.setStyleSheet(
+                base_style
+                + """
+                QMainWindow {
+                    border: 4px solid #f97316;
+                }
+
+                #mainBackground {
+                    border: 4px solid #f97316;
+                    border-radius: 18px;
+                }
+                """
+            )
+
+            if hasattr(self, "pet_window") and self.pet_window is not None:
+                if hasattr(self.pet_window, "set_konami_flash_on"):
+                    self.pet_window.set_konami_flash_on()
+        else:
+            self.setStyleSheet(base_style)
+
+            if hasattr(self, "pet_window") and self.pet_window is not None:
+                if hasattr(self.pet_window, "set_konami_flash_off"):
+                    self.pet_window.set_konami_flash_off()
+
+        self.konami_flash_count += 1
+
+        QTimer.singleShot(180, self.run_konami_flash_step)
+
+    def finish_konami_flash(self):
+        """
+        闪烁结束后恢复主窗口样式，并让宠物进入超级咸鱼模式。
+
+        注意：
+            主窗口闪烁结束后立即恢复。
+            宠物窗口不要在这里熄灭，而是保持发光，
+            直到超级赛亚鱼模式结束后再熄灭。
+        """
+        base_style = self.konami_flash_original_style or ""
+        self.setStyleSheet(base_style)
+
+        if hasattr(self, "pet_window") and self.pet_window is not None:
+            # 闪烁结束后，确保宠物停留在“发光”状态
+            if hasattr(self.pet_window, "set_konami_flash_on"):
+                self.pet_window.set_konami_flash_on()
+
+            if hasattr(self.pet_window, "enter_super_fish_mode"):
+                self.tip_label.setText("鱼开始发光了……")
+
+                self.pet_window.enter_super_fish_mode(
+                    on_finished=self.on_super_fish_mode_finished
+                )
+                return
+
+        self.on_super_fish_mode_finished()
+
+    def on_super_fish_mode_finished(self):
+        """
+        超级咸鱼模式结束后的回调。
+        """
+        self.tip_label.setText("超级咸鱼模式已解除。")
+
+        if hasattr(self, "tray_manager") and self.tray_manager is not None:
+            self.tray_manager.show_message(
+                "CheckMate",
+                "超级咸鱼模式已解除。",
+                3000,
+                icon_type="success"
+            )
