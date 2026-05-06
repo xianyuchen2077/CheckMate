@@ -450,10 +450,6 @@ class MainWindow(QMainWindow):
             self.detail_description.setText("备注说明：-")
             return
 
-        # 记录“今天这个重复任务至少完成过一次”
-        # 即使重复任务一天完成多轮，checkins 表里也只需要有一条当天记录
-        # database.mark_task_done_today(task_id)
-
         title = task["title"]
         remind_time = task["remind_time"] or "未设置"
         description = task["description"] or "暂无备注"
@@ -681,8 +677,10 @@ class MainWindow(QMainWindow):
 
         规则：
             1. 重复提醒任务允许一天完成多轮。
-            2. checkins 表中每天至少记录一条，用于统计和每日刷新。
-            3. 如果当前任务有稍后提醒或重复提醒计时器，提前完成后要重新安排下一轮。
+            2. 只要今天完成过至少一次，就写入 checkins。
+            这样历史记录里今天会显示为已完成。
+            3. 如果用户提前完成，则以下一次提醒应以“当前完成时间”为新起点。
+            4. 完成后要取消旧的稍后提醒 / 重复提醒 timer，避免提醒链分叉。
         """
         task = database.get_task_by_id(task_id)
 
@@ -695,8 +693,8 @@ class MainWindow(QMainWindow):
         remind_time = task["remind_time"]
         repeat_interval_minutes = task["repeat_interval_minutes"]
 
-        # 重复提醒任务：记录今天至少完成过一次。
-        # INSERT OR IGNORE 会保证同一天不会重复插入多条 checkin。
+        # 重复任务：今天至少完成过一次，就要写入 checkins。
+        # INSERT OR IGNORE 会保证同一天不会重复插入多条记录。
         database.mark_task_done_today(task_id)
 
         growth_result = pet_growth.add_exp_for_completed_task(task)
@@ -721,10 +719,12 @@ class MainWindow(QMainWindow):
         if growth_result is not None:
             self.show_pet_growth_dialog(growth_result)
 
-        # 提前完成后，重新安排下一次重复提醒。
-        # schedule_repeat_if_needed 内部已经会取消旧的重复提醒 timer，
-        # 避免旧提醒和新提醒同时存在。
+        # 如果提醒管理器已经启动，则以“当前完成时间”为新起点安排下一次重复提醒。
         if hasattr(self, "reminder_manager") and self.reminder_manager is not None:
+            # 关键：提前完成时，必须先清掉旧的重复提醒 / 稍后提醒 timer。
+            # 否则可能出现旧 timer 到点后又弹一次提醒。
+            self.reminder_manager.cancel_task_timers(task_id)
+
             self.reminder_manager.schedule_repeat_if_needed(
                 task_id,
                 title,
@@ -734,7 +734,7 @@ class MainWindow(QMainWindow):
 
         self.load_tasks()
 
-        # 尝试重新选中刚刚完成的任务
+        # 尝试重新选中刚刚完成的任务，方便用户看到详情和下一次提醒时间
         for row in range(self.task_list.count()):
             item = self.task_list.item(row)
 
