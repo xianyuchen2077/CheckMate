@@ -1,7 +1,8 @@
 from datetime import datetime, date, time, timedelta
 
-from PySide6.QtCore import Qt, QDateTime
+from PySide6.QtCore import Qt, QDateTime, QTimer
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QLabel,
     QPushButton,
@@ -13,6 +14,41 @@ from PySide6.QtWidgets import (
     QDateTimeEdit,
 )
 
+
+def center_dialog(dialog):
+    """
+    将弹窗移动到父窗口中心。
+
+    如果父窗口不可见或不可用，则移动到当前屏幕中心。
+    用 QTimer.singleShot 延迟执行，避免窗口尺寸/窗口标志还没生效时计算位置错误。
+    """
+    parent = dialog.parentWidget()
+
+    if parent is not None and parent.isVisible():
+        parent_rect = parent.frameGeometry()
+        dialog_rect = dialog.frameGeometry()
+
+        x = parent_rect.center().x() - dialog_rect.width() // 2
+        y = parent_rect.center().y() - dialog_rect.height() // 2
+
+        dialog.move(x, y)
+        return
+
+    screen = QApplication.screenAt(dialog.cursor().pos())
+
+    if screen is None:
+        screen = QApplication.primaryScreen()
+
+    if screen is None:
+        return
+
+    screen_rect = screen.availableGeometry()
+    dialog_rect = dialog.frameGeometry()
+
+    x = screen_rect.center().x() - dialog_rect.width() // 2
+    y = screen_rect.center().y() - dialog_rect.height() // 2
+
+    dialog.move(x, y)
 
 class ReminderDialog(QDialog):
     RESULT_DONE = "done"
@@ -190,6 +226,13 @@ class ReminderDialog(QDialog):
                 background-color: #9ca3af;
             }
         """)
+
+    def showEvent(self, event):
+        """
+        弹出时主动居中，避免偶发出现在屏幕左上角。
+        """
+        super().showEvent(event)
+        QTimer.singleShot(0, lambda: center_dialog(self))
 
     def on_done(self):
         self.action_result = self.RESULT_DONE
@@ -418,6 +461,13 @@ class SnoozeDialog(QDialog):
             }
         """)
 
+    def showEvent(self, event):
+        """
+        弹出时主动居中，避免偶发出现在屏幕左上角。
+        """
+        super().showEvent(event)
+        QTimer.singleShot(0, lambda: center_dialog(self))
+
     def choose_minutes(self, minutes):
         self.action_result = self.RESULT_SNOOZE
         self.snooze_until = datetime.now() + timedelta(minutes=minutes)
@@ -429,7 +479,10 @@ class SnoozeDialog(QDialog):
         self.accept()
 
     def choose_custom_time(self):
-        dialog = CustomSnoozeTimeDialog(self)
+        dialog = CustomSnoozeTimeDialog(
+            self,
+            default_snooze_minutes=self.default_snooze_minutes
+        )
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.action_result = self.RESULT_SNOOZE
@@ -443,8 +496,18 @@ class SnoozeDialog(QDialog):
         return self.snooze_until
 
 class CustomSnoozeTimeDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, default_snooze_minutes=15):
         super().__init__(parent)
+
+        try:
+            default_snooze_minutes = int(default_snooze_minutes)
+        except (TypeError, ValueError):
+            default_snooze_minutes = 15
+
+        if default_snooze_minutes <= 0:
+            default_snooze_minutes = 15
+
+        self.default_snooze_minutes = default_snooze_minutes
 
         self.setWindowTitle("自定义稍后提醒时间")
         self.setFixedSize(400, 200)
@@ -475,7 +538,9 @@ class CustomSnoozeTimeDialog(QDialog):
         self.datetime_edit.setFixedHeight(40)
         self.datetime_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        default_time = QDateTime.currentDateTime().addSecs(15 * 60)
+        default_time = QDateTime.currentDateTime().addSecs(
+            self.default_snooze_minutes * 60
+        )
         self.datetime_edit.setDateTime(default_time)
         self.datetime_edit.setMinimumDateTime(QDateTime.currentDateTime().addSecs(60))
 
@@ -531,6 +596,13 @@ class CustomSnoozeTimeDialog(QDialog):
                 background-color: #1d4ed8;
             }
         """)
+
+    def showEvent(self, event):
+        """
+        弹出时主动居中，避免偶发出现在屏幕左上角。
+        """
+        super().showEvent(event)
+        QTimer.singleShot(0, lambda: center_dialog(self))
 
     def get_selected_datetime(self):
         return self.datetime_edit.dateTime().toPython()
