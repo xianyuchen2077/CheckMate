@@ -93,6 +93,16 @@ class SettingsDialog(QDialog):
         self.startup_daily_refresh_switch = None
         self.show_tray_messages_switch = None
 
+        # 提醒设置控件引用
+        self.show_system_notification_switch = None
+        self.reminder_popup_top_switch = None
+        self.reminder_popup_focus_switch = None
+        self.show_reminder_popup_switch = None
+        self.confirm_skip_today_switch = None
+        self.default_snooze_combo = None
+        self.default_remind_time_combo = None
+        self.default_repeat_interval_combo = None
+
         # 宠物设置控件引用
         self.pet_visible_switch = None
         self.pet_startup_switch = None
@@ -107,6 +117,7 @@ class SettingsDialog(QDialog):
         self.backup_count_label = None
         self.startup_auto_backup_switch = None
         self.auto_backup_keep_combo = None
+        self.trust_database_row = None  # 高风险按钮：默认隐藏，开发者模式开启后显示
 
         self.setWindowTitle("设置 - CheckMate")
         self.setFixedSize(780, 540)
@@ -331,64 +342,125 @@ class SettingsDialog(QDialog):
 
         container = page.findChild(QWidget, "pageContent")
 
-        self.add_combo_row(
+        reminder_config = config_manager.get_reminder_config()
+
+
+        default_remind_time = str(
+            reminder_config.get("default_remind_time", "10:00")
+        )
+
+        remind_time_items = [
+            "08:00",
+            "09:00",
+            "10:00",
+            "12:00",
+            "18:00",
+            "20:00",
+            "21:00",
+            "22:00",
+        ]
+
+        if default_remind_time in remind_time_items:
+            default_remind_time_index = remind_time_items.index(default_remind_time)
+        else:
+            default_remind_time_index = remind_time_items.index("10:00")
+
+        self.default_remind_time_combo = self.add_combo_row(
             container,
             title="默认提醒时间",
-            description="新建任务时可使用的默认提醒时间。",
-            items=["不设置", "08:00", "09:00", "12:00", "18:00", "22:00"],
-            current_index=0,
+            description="新建任务时自动填入的提醒时间。",
+            items=remind_time_items,
+            current_index=default_remind_time_index,
         )
 
-        self.add_combo_row(
+
+        default_repeat_interval = reminder_config.get(
+            "default_repeat_interval_minutes",
+            None
+        )
+
+        repeat_value_to_index = {
+            None: 0,
+            0: 0,
+            30: 1,
+            60: 2,
+            120: 3,
+        }
+
+        try:
+            if default_repeat_interval is not None:
+                default_repeat_interval = int(default_repeat_interval)
+        except (TypeError, ValueError):
+            default_repeat_interval = None
+
+        self.default_repeat_interval_combo = self.add_combo_row(
             container,
             title="默认重复提醒间隔",
-            description="新建任务时可使用的默认重复间隔。",
-            items=["不重复", "5 分钟", "10 分钟", "30 分钟", "1 小时", "自定义"],
-            current_index=0,
+            description="新建任务时默认的重复提醒间隔。",
+            items=["不重复", "30 分钟", "1 小时", "2 小时"],
+            current_index=repeat_value_to_index.get(default_repeat_interval, 0),
         )
 
-        self.add_combo_row(
+        default_snooze_minutes = int(
+            reminder_config.get("default_snooze_minutes", 5)
+        )
+
+        snooze_minutes_to_index = {
+            5: 0,
+            10: 1,
+            30: 2,
+            60: 3,
+        }
+
+
+        self.default_snooze_combo = self.add_combo_row(
             container,
             title="默认稍后提醒时间",
             description="点击稍后提醒时优先使用的默认时间。",
             items=["5 分钟", "10 分钟", "30 分钟", "1 小时"],
-            current_index=0,
+            current_index=snooze_minutes_to_index.get(default_snooze_minutes, 0),
         )
 
-        self.add_switch_row(
+
+        self.show_system_notification_switch = self.add_switch_row(
             container,
             title="显示系统通知",
             description="到点时在 Windows 通知区域显示提醒。",
-            checked=True,
+            checked=bool(reminder_config.get("show_system_notification", True)),
         )
 
-        self.add_switch_row(
+
+        self.show_reminder_popup_switch = self.add_switch_row(
             container,
             title="显示提醒弹窗",
             description="到点时弹出 CheckMate 提醒窗口。",
-            checked=True,
+            checked=bool(reminder_config.get("show_reminder_popup", True)),
         )
 
-        self.add_switch_row(
+
+        self.confirm_skip_today_switch = self.add_switch_row(
             container,
             title="“今天不再提醒”前二次确认",
             description="避免误点后错过任务提醒。",
-            checked=True,
+            checked=bool(reminder_config.get("confirm_skip_today", True)),
         )
 
-        self.add_switch_row(
+
+        self.reminder_popup_top_switch = self.add_switch_row(
             container,
             title="提醒弹窗置顶",
             description="提醒弹窗出现时保持在其他窗口上方。",
-            checked=True,
+            checked=bool(reminder_config.get("reminder_popup_always_on_top", True)),
         )
 
-        self.add_switch_row(
+
+        self.reminder_popup_focus_switch = self.add_switch_row(
             container,
             title="提醒弹窗自动聚焦",
             description="提醒弹窗出现时自动获得焦点，适合强提醒场景。",
-            checked=False,
+            checked=bool(reminder_config.get("reminder_popup_auto_focus", False)),
         )
+
 
         self.add_combo_row(
             container,
@@ -398,12 +470,14 @@ class SettingsDialog(QDialog):
             current_index=2,
         )
 
+
         self.add_switch_row(
             container,
             title="启用静默时段",
             description="在指定时间段内不弹出提醒，只保留任务状态。",
             checked=False,
         )
+
 
         self.add_combo_row(
             container,
@@ -413,12 +487,14 @@ class SettingsDialog(QDialog):
             current_index=0,
         )
 
+
         self.add_switch_row(
             container,
             title="提醒音效",
             description="提醒弹窗出现时播放提示音。",
             checked=False,
         )
+
 
         self.add_hint_card(
             container,
@@ -653,13 +729,24 @@ class SettingsDialog(QDialog):
         )
         self.add_to_container(container, cleanup_buttons)
 
-        danger_buttons = self.create_button_row(
+        restore_buttons = self.create_button_row(
             title="危险操作",
-            description="恢复备份和信任数据库会影响数据安全状态，操作前会二次确认。",
-            buttons=["从最近备份恢复", "信任当前数据库"],
+            description="从最近备份恢复会覆盖当前数据库，操作前会二次确认。",
+            buttons=["从最近备份恢复"],
             danger=True,
         )
-        self.add_to_container(container, danger_buttons)
+        self.add_to_container(container, restore_buttons)
+
+        self.trust_database_row = self.create_button_row(
+            title="开发者操作",
+            description="刷新当前数据库的完整性记录。仅在你确认当前数据库可信时使用。",
+            buttons=["信任当前数据库"],
+            danger=True,
+        )
+
+        # 默认隐藏，只有触发开发者模式后才显示
+        self.trust_database_row.hide()
+        self.add_to_container(container, self.trust_database_row)
 
         self.add_hint_card(
             container,
@@ -762,7 +849,7 @@ class SettingsDialog(QDialog):
         return page
 
     def create_about_page(self):
-        page = self.create_scroll_page("关于CheckMate —— 不要成为咸鱼","")
+        page = self.create_scroll_page("关于CheckMate —— 不要成为咸鱼","作者：当条咸鱼")
 
         container = page.findChild(QWidget, "pageContent")
 
@@ -1215,6 +1302,7 @@ class SettingsDialog(QDialog):
         self.apply_auto_start_setting()
         self.apply_general_settings()
         self.apply_data_management_settings()
+        self.apply_reminder_settings()
 
         # Debug 输出当前设置状态
         # print(
@@ -1307,6 +1395,60 @@ class SettingsDialog(QDialog):
 
         print(f"TODO: 设置按钮点击：{action}")
 
+    def apply_reminder_settings(self):
+        """
+        应用提醒设置。
+        """
+        if (
+            self.show_system_notification_switch is None
+            or self.reminder_popup_top_switch is None
+            or self.reminder_popup_focus_switch is None
+            or self.show_reminder_popup_switch is None
+            or self.confirm_skip_today_switch is None
+            or self.default_snooze_combo is None
+            or self.default_remind_time_combo is None
+            or self.default_repeat_interval_combo is None
+        ):
+            return
+
+        snooze_text = self.default_snooze_combo.currentText()
+
+        snooze_minutes_map = {
+            "5 分钟": 5,
+            "10 分钟": 10,
+            "30 分钟": 30,
+            "1 小时": 60,
+        }
+
+        default_snooze_minutes = snooze_minutes_map.get(snooze_text, 5)
+
+        default_remind_time = self.default_remind_time_combo.currentText()
+
+        repeat_text = self.default_repeat_interval_combo.currentText()
+
+        repeat_interval_map = {
+            "不重复": None,
+            "30 分钟": 30,
+            "1 小时": 60,
+            "2 小时": 120,
+        }
+
+        default_repeat_interval_minutes = repeat_interval_map.get(
+            repeat_text,
+            None
+        )
+
+        config_manager.update_reminder_config(
+            show_system_notification=self.show_system_notification_switch.isChecked(),
+            show_reminder_popup=self.show_reminder_popup_switch.isChecked(),
+            confirm_skip_today=self.confirm_skip_today_switch.isChecked(),
+            default_snooze_minutes=default_snooze_minutes,
+            default_remind_time=default_remind_time,
+            default_repeat_interval_minutes=default_repeat_interval_minutes,
+            reminder_popup_always_on_top=self.reminder_popup_top_switch.isChecked(),
+            reminder_popup_auto_focus=self.reminder_popup_focus_switch.isChecked(),
+        )
+
     def open_folder(self, folder_path):
         """
         打开指定文件夹。
@@ -1327,7 +1469,6 @@ class SettingsDialog(QDialog):
 
         if self.main_window is not None and hasattr(self.main_window, "tip_label"):
             self.main_window.tip_label.setText("已打开数据文件夹。")
-
 
     def open_backup_folder(self):
         """
@@ -1928,9 +2069,10 @@ class SettingsDialog(QDialog):
 
         remaining = 6 - self.developer_click_count
 
-        if remaining > 0:
-            print(f"开发者模式还需要点击 {remaining} 次")
-            return
+        # Debug 输出点击状态
+        # if remaining > 0:
+        #     print(f"开发者模式还需要点击 {remaining} 次")
+        #     return
 
         self.enable_developer_mode()
 
@@ -1947,6 +2089,10 @@ class SettingsDialog(QDialog):
 
         if self.developer_card is not None:
             self.developer_card.show()
+
+        # 开发者模式开启后，显示高风险数据库信任按钮
+        if self.trust_database_row is not None:
+            self.trust_database_row.show()
 
         QMessageBox.information(
             self,

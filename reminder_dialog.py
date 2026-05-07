@@ -211,17 +211,23 @@ class SnoozeDialog(QDialog):
     RESULT_TODAY_SKIP = "today_skip"
     RESULT_SNOOZE = "snooze"
 
-    def __init__(self, task_title, parent=None):
+    def __init__(self, task_title, parent=None, default_snooze_minutes=5):
         super().__init__(parent)
 
         self.task_title = task_title
         self.action_result = self.RESULT_CANCEL
         self.snooze_until = None
 
+        # 设置页中的“默认稍后提醒时间”
+        # 用于第一个快捷按钮和自定义时间弹窗的默认时间。
+        self.default_snooze_minutes = self.normalize_snooze_minutes(
+            default_snooze_minutes
+        )
+
         self.setWindowTitle("稍后提醒")
-        self.setFixedSize(480, 410)
-        self.setMinimumSize(480, 410)
-        self.setMaximumSize(480, 410)
+        self.setFixedSize(480, 455)
+        self.setMinimumSize(480, 455)
+        self.setMaximumSize(480, 455)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
 
         self.init_ui()
@@ -231,6 +237,36 @@ class SnoozeDialog(QDialog):
         if layout is not None:
             layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
 
+    def normalize_snooze_minutes(self, minutes):
+        """
+        规范化默认稍后提醒分钟数。
+        防止配置文件里出现非法值。
+        """
+        try:
+            minutes = int(minutes)
+        except (TypeError, ValueError):
+            return 5
+
+        if minutes <= 0:
+            return 5
+
+        return minutes
+
+    def format_minutes_text(self, minutes):
+        """
+        把分钟数格式化成按钮文案。
+        """
+        if minutes < 60:
+            return f"{minutes} 分钟"
+
+        hours = minutes // 60
+        rest_minutes = minutes % 60
+
+        if rest_minutes == 0:
+            return f"{hours} 小时"
+
+        return f"{hours} 小时 {rest_minutes} 分钟"
+
     def init_ui(self):
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(18, 18, 18, 18)
@@ -239,7 +275,7 @@ class SnoozeDialog(QDialog):
         card = QFrame()
         card.setObjectName("snoozeCard")
         card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        card.setFixedSize(444, 374)
+        card.setFixedSize(444, 419)
 
         card_layout = QVBoxLayout()
         card_layout.setContentsMargins(22, 18, 22, 18)
@@ -260,6 +296,9 @@ class SnoozeDialog(QDialog):
         task_label.setMaximumHeight(52)
         task_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
+        default_snooze_text = self.format_minutes_text(self.default_snooze_minutes)
+
+        self.btn_default_snooze = QPushButton(f"默认稍后：{default_snooze_text}")
         self.btn_5_min = QPushButton("再给我5分钟~")
         self.btn_10_min = QPushButton("向天再借600秒")
         self.btn_30_min = QPushButton("先拖半小时")
@@ -268,6 +307,7 @@ class SnoozeDialog(QDialog):
         self.btn_custom = QPushButton("说吧，你想拖多久")
 
         buttons = [
+            self.btn_default_snooze,
             self.btn_5_min,
             self.btn_10_min,
             self.btn_30_min,
@@ -283,9 +323,13 @@ class SnoozeDialog(QDialog):
             button.setMaximumHeight(36)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
+        self.btn_default_snooze.setObjectName("primaryButton")
         self.btn_skip_today.setObjectName("dangerButton")
         self.btn_custom.setObjectName("primaryButton")
 
+        self.btn_default_snooze.clicked.connect(
+            lambda: self.choose_minutes(self.default_snooze_minutes)
+        )
         self.btn_5_min.clicked.connect(lambda: self.choose_minutes(5))
         self.btn_10_min.clicked.connect(lambda: self.choose_minutes(10))
         self.btn_30_min.clicked.connect(lambda: self.choose_minutes(30))

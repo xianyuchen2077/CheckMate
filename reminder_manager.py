@@ -1,11 +1,13 @@
 from datetime import datetime,timedelta
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtWidgets import QMessageBox
 
 import database
 from reminder_dialog import ReminderDialog, SnoozeDialog
 from pet_system import pet_growth
 from pet_growth_dialog import PetGrowthDialog
+import config_manager
 
 class ReminderManager:
     def __init__(self, main_window, tray_manager=None, pet_window=None):
@@ -26,6 +28,12 @@ class ReminderManager:
         # 保存运行时下一次真实提醒时间
         # task_id -> datetime
         self.next_remind_times = {}
+
+    def get_reminder_config(self):
+        """
+        获取提醒设置配置。
+        """
+        return config_manager.get_reminder_config()
 
     def start(self):
         """
@@ -87,11 +95,30 @@ class ReminderManager:
         self.notify_pet_reminding(title)
         self.notify_tray_reminding(title, remind_time)
 
+        reminder_config = self.get_reminder_config()
+
+        # 如果关闭提醒弹窗，则只保留宠物状态 / 系统通知。
+        # 对重复提醒任务来说，需要继续安排下一轮，避免提醒链断掉。
+        if not reminder_config.get("show_reminder_popup", True):
+            self.schedule_repeat_if_needed(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes
+            )
+            return
+
         dialog = ReminderDialog(
             task_title=title,
             remind_time=remind_time,
             parent=self.main_window
         )
+
+        self.apply_reminder_dialog_settings(dialog)
+
+        if reminder_config.get("reminder_popup_auto_focus", False):
+            QTimer.singleShot(0, dialog.raise_)
+            QTimer.singleShot(0, dialog.activateWindow)
 
         dialog.exec()
         action_result = dialog.get_action_result()
@@ -142,6 +169,12 @@ class ReminderManager:
         """
         发送系统托盘提醒。
         """
+        reminder_config = self.get_reminder_config()
+
+        # 设置中关闭系统通知后，到点提醒不再弹 Windows 托盘通知。
+        if not reminder_config.get("show_system_notification", True):
+            return
+
         if self.tray_manager is not None:
             self.tray_manager.show_message(
                 "CheckMate 提醒",
@@ -149,6 +182,29 @@ class ReminderManager:
                 5000,
                 icon_type="reminder"
             )
+
+    def apply_reminder_dialog_settings(self, dialog):
+        """
+        根据设置调整提醒弹窗行为。
+        """
+        reminder_config = self.get_reminder_config()
+
+        always_on_top = bool(
+            reminder_config.get("reminder_popup_always_on_top", True)
+        )
+
+        auto_focus = bool(
+            reminder_config.get("reminder_popup_auto_focus", False)
+        )
+
+        dialog.setWindowFlag(
+            Qt.WindowType.WindowStaysOnTopHint,
+            always_on_top
+        )
+
+        if auto_focus:
+            dialog.raise_()
+            dialog.activateWindow()
 
     def handle_done(self, task_id, title, remind_time=None, repeat_interval_minutes=None):
         """
@@ -370,7 +426,15 @@ class ReminderManager:
             )
 
         elif action_result == SnoozeDialog.RESULT_TODAY_SKIP:
-            self.skip_task_today(task_id, title)
+            if self.confirm_skip_today_if_needed(title):
+                self.skip_task_today(task_id, title)
+            else:
+                self.schedule_repeat_if_needed(
+                    task_id,
+                    title,
+                    remind_time,
+                    repeat_interval_minutes
+                )
 
         else:
             # 用户关闭稍后弹窗：
@@ -438,6 +502,28 @@ class ReminderManager:
         timer.start(delay_ms)
 
         self.set_next_remind_time(task_id, snooze_until)
+
+    def confirm_skip_today_if_needed(self, title):
+        """
+        根据设置决定“今天不再提醒”前是否需要二次确认。
+        """
+        reminder_config = self.get_reminder_config()
+
+        if not reminder_config.get("confirm_skip_today", True):
+            return True
+
+        reply = QMessageBox.question(
+            self.main_window,
+            "确认今天不再提醒",
+            (
+                f"确定今天不再提醒「{title}」吗？🐟\n\n"
+                "这个任务今天将不会再弹出提醒。"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        return reply == QMessageBox.StandardButton.Yes
 
     def handle_snooze_timeout(
         self,

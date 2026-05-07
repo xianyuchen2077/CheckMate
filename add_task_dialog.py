@@ -132,11 +132,13 @@ class AddTaskDialog(QDialog):
         remind_time=None,
         description="",
         repeat_interval_minutes=None,
-        task_type="habit"
+        task_type="habit",
+        default_remind_time=None
     ):
         super().__init__(parent)
 
         self.task_type = task_type or "habit"
+        self.default_remind_time = default_remind_time or "10:00"
 
         self.setWindowTitle("添加任务" if not title else "编辑任务")
         # 固定尺寸，避免拖动或重绘时布局变形
@@ -211,12 +213,21 @@ class AddTaskDialog(QDialog):
         time_control_layout.addWidget(self.time_now_btn)
 
         if remind_time:
+            # 编辑已有提醒任务：使用任务原本的提醒时间，并自动勾选提醒
             self.enable_time_checkbox.setChecked(True)
             self.time_edit.setTime(QTime.fromString(remind_time, "HH:mm"))
             self.time_edit.setEnabled(True)
         else:
+            # 新建任务或编辑无提醒任务：
+            # 默认不启用提醒，但时间框预填设置页里的默认提醒时间
             self.enable_time_checkbox.setChecked(False)
-            self.time_edit.setTime(QTime.currentTime())
+
+            default_time = QTime.fromString(self.default_remind_time, "HH:mm")
+
+            if not default_time.isValid():
+                default_time = QTime.fromString("09:00", "HH:mm")
+
+            self.time_edit.setTime(default_time)
             self.time_edit.setEnabled(False)
 
         self.time_minus_10_btn.setEnabled(self.enable_time_checkbox.isChecked())
@@ -290,7 +301,6 @@ class AddTaskDialog(QDialog):
         self.setLayout(outer_layout)
         self.setStyleSheet(get_add_task_dialog_style(get_add_task_background_path()))
 
-
     def create_form_label(self, text, offset_y=0):
         """
         创建表单左侧文字。
@@ -321,7 +331,6 @@ class AddTaskDialog(QDialog):
         """
         current_time = self.time_edit.time()
         self.time_edit.setTime(current_time.addSecs(minutes * 60))
-
 
     def set_time_now(self):
         """

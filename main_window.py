@@ -647,7 +647,25 @@ class MainWindow(QMainWindow):
             self.complete_btn.setText("完成打卡")
 
     def add_task(self):
-        dialog = AddTaskDialog(self)
+        reminder_config = config_manager.get_reminder_config()
+
+        default_remind_time = reminder_config.get("default_remind_time", "09:00")
+        default_repeat_interval_minutes = reminder_config.get(
+            "default_repeat_interval_minutes",
+            None
+        )
+
+        try:
+            if default_repeat_interval_minutes is not None:
+                default_repeat_interval_minutes = int(default_repeat_interval_minutes)
+        except (TypeError, ValueError):
+            default_repeat_interval_minutes = None
+
+        dialog = AddTaskDialog(
+            self,
+            default_remind_time=default_remind_time,
+            repeat_interval_minutes=default_repeat_interval_minutes,
+        )
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             title, remind_time, description, repeat_interval_minutes, task_type = dialog.get_data()
@@ -686,13 +704,17 @@ class MainWindow(QMainWindow):
             self.load_tasks()
             return
 
+        reminder_config = config_manager.get_reminder_config()
+        default_remind_time = reminder_config.get("default_remind_time", "09:00")
+
         dialog = AddTaskDialog(
             self,
             title=task["title"],
             remind_time=task["remind_time"],
             description=task["description"],
             repeat_interval_minutes=task["repeat_interval_minutes"],
-            task_type=task["task_type"]
+            task_type=task["task_type"],
+            default_remind_time=default_remind_time,
         )
 
         if dialog.exec() != QDialog.DialogCode.Accepted:

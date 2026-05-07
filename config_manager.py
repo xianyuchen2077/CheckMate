@@ -17,6 +17,16 @@ DEFAULT_CONFIG = {
         "check_data_guard_on_startup": True,
         "refresh_tasks_on_startup": True,
     },
+    "reminder": {
+        "show_system_notification": True,
+        "show_reminder_popup": True,
+        "confirm_skip_today": True,
+        "default_snooze_minutes": 5,
+        "default_remind_time": "10:00",
+        "default_repeat_interval_minutes": None,
+        "reminder_popup_always_on_top": True,
+        "reminder_popup_auto_focus": False,
+    },
     "data_management": {
         "auto_backup_on_startup": True,
         "auto_backup_keep_count": 5,
@@ -101,6 +111,7 @@ def merge_config(default_config, user_config):
 def get_general_config():
     config = load_config()
     return config["general"]
+
 def update_general_config(**kwargs):
     """
     更新常规配置。
@@ -116,13 +127,32 @@ def update_general_config(**kwargs):
 
     save_config(config)
 
+
+def get_reminder_config():
+    """
+    获取提醒设置配置。
+    """
+    config = load_config()
+    return config["reminder"]
+
+def update_reminder_config(**kwargs):
+    """
+    更新提醒设置配置。
+    """
+    config = load_config()
+
+    for key, value in kwargs.items():
+        config["reminder"][key] = value
+
+    save_config(config)
+
+
 def get_data_management_config():
     """
     获取数据管理配置。
     """
     config = load_config()
     return config["data_management"]
-
 
 def update_data_management_config(**kwargs):
     """
@@ -134,6 +164,7 @@ def update_data_management_config(**kwargs):
         config["data_management"][key] = value
 
     save_config(config)
+
 
 def get_pet_config():
     config = load_config()
