@@ -8,7 +8,10 @@ APP_NAME = "CheckMate"
 
 PROJECT_DIR = Path(__file__).resolve().parent
 MAIN_FILE = PROJECT_DIR / "main.py"
+
+# 资源目录
 ASSETS_DIR = PROJECT_DIR / "assets"
+REMINDER_SOUNDS_DIR = ASSETS_DIR / "sounds" / "reminders"
 
 # exe 程序图标
 ICON_PNG_FILE = PROJECT_DIR / "assets" / "icons" / "checkmate_icon.png"
@@ -60,16 +63,18 @@ def ensure_pyinstaller():
         print("未检测到 PyInstaller，正在安装...")
         run_command([sys.executable, "-m", "pip", "install", "-U", "pyinstaller"])
 
+
 def ensure_pywin32():
     """
     确保 pywin32 可用，用于创建 Windows 快捷方式。
     """
     try:
-        import win32com.client
+        import win32com.client  # noqa: F401
         print("pywin32 已安装。")
     except ImportError:
         print("未检测到 pywin32，正在安装...")
         run_command([sys.executable, "-m", "pip", "install", "pywin32"])
+
 
 def ensure_ico_file(png_file, ico_file, label="图标"):
     """
@@ -114,7 +119,8 @@ def ensure_ico_file(png_file, ico_file, label="图标"):
     print(f"已根据 PNG 生成 {label} ico 图标：{ico_file}")
     return True
 
-def ensure_icon_file():
+
+def ensure_icon_files():
     """
     确保 exe 图标和快捷方式图标都存在。
     """
@@ -129,6 +135,18 @@ def ensure_icon_file():
         SHORTCUT_ICON_ICO_FILE,
         label="快捷方式"
     )
+
+
+def ensure_sound_dirs():
+    """
+    确保提醒音效目录存在。
+
+    即使当前没有音频文件，也保留这个目录结构，
+    方便后续往 assets/sounds/reminders/ 中添加音效。
+    """
+    REMINDER_SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"提醒音效目录检查通过：{REMINDER_SOUNDS_DIR}")
+
 
 def clean_old_build():
     print("\n清理旧打包文件...")
@@ -181,6 +199,9 @@ def build_exe():
         print("未找到 .ico 图标文件，跳过 exe 图标设置。")
 
     if ASSETS_DIR.exists():
+        # 注意：
+        # 这里打包整个 assets 文件夹。
+        # assets/sounds/reminders/ 会随 assets 一起进入 release。
         command.extend([
             "--add-data",
             f"{ASSETS_DIR};assets"
@@ -194,11 +215,48 @@ def build_exe():
     run_command(command)
 
 
+def get_release_app_dir():
+    """
+    获取 onedir 模式下的应用输出目录。
+    """
+    return RELEASE_DIR / APP_NAME
+
+
+def get_release_exe_path():
+    """
+    获取 release 中的 exe 路径。
+    """
+    return get_release_app_dir() / f"{APP_NAME}.exe"
+
+
+def find_release_assets_dir():
+    """
+    查找 release 中的 assets 目录。
+
+    PyInstaller onedir 模式下，不同版本可能放在：
+        release/CheckMate/_internal/assets
+    或：
+        release/CheckMate/assets
+    """
+    release_app_dir = get_release_app_dir()
+
+    possible_assets_dirs = [
+        release_app_dir / "_internal" / "assets",
+        release_app_dir / "assets",
+    ]
+
+    for assets_dir in possible_assets_dirs:
+        if assets_dir.exists():
+            return assets_dir
+
+    return None
+
+
 def check_build_result():
-    exe_path = RELEASE_DIR / APP_NAME / f"{APP_NAME}.exe"
+    exe_path = get_release_exe_path()
 
     # PyInstaller onedir 模式下，Python DLL 通常会在 _internal 目录中
-    python_dll_candidates = list((RELEASE_DIR / APP_NAME).glob("_internal/python*.dll"))
+    python_dll_candidates = list(get_release_app_dir().glob("_internal/python*.dll"))
 
     print("\n" + "=" * 60)
 
@@ -225,6 +283,45 @@ def check_build_result():
     print("=" * 60)
 
 
+def check_assets_result():
+    """
+    检查 release 中是否包含 assets 和提醒音效目录。
+    """
+    print("\n资源文件检查：")
+
+    assets_dir = find_release_assets_dir()
+
+    if assets_dir is None:
+        print("警告：release 中没有找到 assets 文件夹。")
+        print("请检查 PyInstaller 的 --add-data 参数。")
+        return
+
+    print(f"assets 已打包：{assets_dir}")
+
+    sound_dir = assets_dir / "sounds" / "reminders"
+
+    if not sound_dir.exists():
+        print("警告：release 中没有找到 assets/sounds/reminders。")
+        print("如果你使用提醒音效下拉框，release 中可能无法读取音频文件。")
+        return
+
+    print(f"提醒音效目录已打包：{sound_dir}")
+
+    sound_files = [
+        path.name
+        for path in sound_dir.iterdir()
+        if path.is_file()
+    ]
+
+    if not sound_files:
+        print("提醒音效目录存在，但当前没有音频文件。")
+        return
+
+    print("已包含提醒音效：")
+    for file_name in sorted(sound_files, key=str.lower):
+        print(f"  - {file_name}")
+
+
 def create_release_shortcut():
     """
     在 release 目录下创建 CheckMate 快捷方式。
@@ -238,7 +335,7 @@ def create_release_shortcut():
     图标：
         assets/icons/checkmate_shortcut_icon.ico
     """
-    exe_path = RELEASE_DIR / APP_NAME / f"{APP_NAME}.exe"
+    exe_path = get_release_exe_path()
 
     if not exe_path.exists():
         print("\n未找到 exe，无法创建快捷方式：")
@@ -293,10 +390,13 @@ def main():
     check_main_file()
     ensure_pyinstaller()
     ensure_pywin32()
-    ensure_icon_file()
+    ensure_icon_files()
+    ensure_sound_dirs()
+
     clean_old_build()
     build_exe()
     check_build_result()
+    check_assets_result()
     create_release_shortcut()
     clean_temp_build_dir()
 

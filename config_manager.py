@@ -26,6 +26,9 @@ DEFAULT_CONFIG = {
         "default_repeat_interval_minutes": None,
         "reminder_popup_always_on_top": True,
         "reminder_popup_auto_focus": False,
+        "reminder_sound_enabled": True,
+        "reminder_sound_path": "",
+        "reminder_sound_file": "",
     },
     "data_management": {
         "auto_backup_on_startup": True,

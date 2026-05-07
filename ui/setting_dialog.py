@@ -1,3 +1,4 @@
+import sys
 import shutil
 from pathlib import Path
 
@@ -52,6 +53,34 @@ from data_guard.integrity_manager import (
 
 GITHUB_REPO_URL = "https://github.com/xianyuchen2077/CheckMate"
 GITHUB_RELEASE_URL = "https://github.com/xianyuchen2077/CheckMate/releases"
+
+def get_base_dir():
+    """
+    获取项目资源基础目录。
+    开发环境：项目根目录
+    打包环境：exe 所在目录或 PyInstaller 临时目录。
+    """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+
+        if meipass:
+            return Path(meipass)
+
+        return Path(sys.executable).resolve().parent
+
+    return Path(__file__).resolve().parent.parent
+
+ASSETS_DIR = get_base_dir() / "assets"
+REMINDER_SOUNDS_DIR = ASSETS_DIR / "sounds" / "reminders"
+REMINDER_SOUNDS_DIR = get_base_dir() / "assets" / "sounds" / "reminders"
+
+SUPPORTED_SOUND_EXTENSIONS = {
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".aac",
+    ".ogg",
+}
 class NoWheelComboBox(QComboBox):
     """
     禁止鼠标滚轮直接切换选项的下拉框。
@@ -102,6 +131,10 @@ class SettingsDialog(QDialog):
         self.default_snooze_combo = None
         self.default_remind_time_combo = None
         self.default_repeat_interval_combo = None
+        self.reminder_sound_switch = None
+        self.reminder_sound_file_label = None
+        self.selected_reminder_sound_path = ""
+        self.reminder_sound_combo = None
 
         # 宠物设置控件引用
         self.pet_visible_switch = None
@@ -488,12 +521,40 @@ class SettingsDialog(QDialog):
         )
 
 
-        self.add_switch_row(
-            container,
-            title="提醒音效",
-            description="提醒弹窗出现时播放提示音。",
-            checked=False,
+        # self.reminder_sound_switch = self.add_switch_row(
+        #     container,
+        #     title="提醒音效",
+        #     description="提醒出现时播放提示音。可从 assets/sounds/reminders 中选择音频文件。",
+        #     checked=bool(reminder_config.get("reminder_sound_enabled", True)),
+        # )
+
+        sound_files = self.get_available_reminder_sound_files()
+
+        sound_items = ["系统默认提示音"] + sound_files
+
+        current_sound_file = str(
+            reminder_config.get("reminder_sound_file", "") or ""
         )
+
+        if current_sound_file in sound_items:
+            current_sound_index = sound_items.index(current_sound_file)
+        else:
+            current_sound_index = 0
+
+        self.reminder_sound_combo = self.add_combo_row(
+            container,
+            title="提醒音效文件",
+            description="自动读取 assets/sounds/reminders 文件夹中的音频文件。",
+            items=sound_items,
+            current_index=current_sound_index,
+        )
+
+        sound_buttons = self.create_button_row(
+            title="音效操作",
+            description="试听当前选择的提醒音效，或打开音效文件夹添加更多音频。",
+            buttons=["试听提醒音效", "打开音效文件夹"],
+        )
+        self.add_to_container(container, sound_buttons)
 
 
         self.add_hint_card(
@@ -1325,6 +1386,14 @@ class SettingsDialog(QDialog):
         """
         设置页按钮点击事件。
         """
+        if action == "试听提醒音效":
+            self.test_reminder_sound_file()
+            return
+
+        if action == "打开音效文件夹":
+            self.open_reminder_sound_folder()
+            return
+
         if action == "回到右下角":
             self.move_pet_to_bottom_right()
             return
@@ -1395,6 +1464,75 @@ class SettingsDialog(QDialog):
 
         print(f"TODO: 设置按钮点击：{action}")
 
+    def get_available_reminder_sound_files(self):
+        """
+        扫描 assets/sounds/reminders 下的音频文件。
+        返回文件名列表，不返回绝对路径。
+        """
+        REMINDER_SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
+
+        sound_files = []
+
+        for path in REMINDER_SOUNDS_DIR.iterdir():
+            if not path.is_file():
+                continue
+
+            if path.suffix.lower() not in SUPPORTED_SOUND_EXTENSIONS:
+                continue
+
+            sound_files.append(path.name)
+
+        sound_files.sort(key=lambda name: name.lower())
+
+        return sound_files
+
+    def test_reminder_sound_file(self):
+        """
+        试听当前下拉框选择的提醒音效。
+        """
+        if self.reminder_sound_combo is None:
+            return
+
+        selected_sound = self.reminder_sound_combo.currentText()
+
+        if selected_sound == "系统默认提示音":
+            QApplication.beep()
+            return
+
+        sound_path = REMINDER_SOUNDS_DIR / selected_sound
+
+        if not sound_path.exists():
+            QMessageBox.warning(
+                self,
+                "试听失败",
+                "选择的音效文件不存在。"
+            )
+            return
+
+        if (
+            self.main_window is not None
+            and hasattr(self.main_window, "reminder_manager")
+            and self.main_window.reminder_manager is not None
+        ):
+            self.main_window.reminder_manager.play_sound_file(sound_path)
+            return
+
+        QMessageBox.information(
+            self,
+            "试听提醒音效",
+            "提醒管理器尚未初始化，请启动主窗口后再试听。"
+        )
+
+    def open_reminder_sound_folder(self):
+        """
+        打开提醒音效文件夹。
+        """
+        REMINDER_SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
+        self.open_folder(REMINDER_SOUNDS_DIR)
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("已打开提醒音效文件夹。")
+
     def apply_reminder_settings(self):
         """
         应用提醒设置。
@@ -1408,6 +1546,8 @@ class SettingsDialog(QDialog):
             or self.default_snooze_combo is None
             or self.default_remind_time_combo is None
             or self.default_repeat_interval_combo is None
+            or self.reminder_sound_switch is None
+            or self.reminder_sound_combo is None
         ):
             return
 
@@ -1438,6 +1578,11 @@ class SettingsDialog(QDialog):
             None
         )
 
+        selected_sound = self.reminder_sound_combo.currentText()
+
+        if selected_sound == "系统默认提示音":
+            selected_sound = ""
+
         config_manager.update_reminder_config(
             show_system_notification=self.show_system_notification_switch.isChecked(),
             show_reminder_popup=self.show_reminder_popup_switch.isChecked(),
@@ -1447,6 +1592,8 @@ class SettingsDialog(QDialog):
             default_repeat_interval_minutes=default_repeat_interval_minutes,
             reminder_popup_always_on_top=self.reminder_popup_top_switch.isChecked(),
             reminder_popup_auto_focus=self.reminder_popup_focus_switch.isChecked(),
+            reminder_sound_enabled=self.reminder_sound_switch.isChecked() if self.reminder_sound_switch is not None else True,
+            reminder_sound_file=selected_sound,
         )
 
     def open_folder(self, folder_path):

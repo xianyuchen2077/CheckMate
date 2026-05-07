@@ -1,13 +1,35 @@
 from datetime import datetime,timedelta
 
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QMessageBox
+from pathlib import Path
+
+from PySide6.QtCore import QTimer, Qt, QUrl
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 import database
 from reminder_dialog import ReminderDialog, SnoozeDialog
 from pet_system import pet_growth
 from pet_growth_dialog import PetGrowthDialog
 import config_manager
+
+def get_base_dir():
+    """
+    获取项目基础目录。
+    """
+    import sys
+
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+
+        if meipass:
+            return Path(meipass)
+
+        return Path(sys.executable).resolve().parent
+
+    return Path(__file__).resolve().parent
+
+
+REMINDER_SOUNDS_DIR = get_base_dir() / "assets" / "sounds" / "reminders"
 
 class ReminderManager:
     def __init__(self, main_window, tray_manager=None, pet_window=None):
@@ -28,6 +50,12 @@ class ReminderManager:
         # 保存运行时下一次真实提醒时间
         # task_id -> datetime
         self.next_remind_times = {}
+
+        # 自定义提醒音效播放器
+        self.sound_player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.sound_player.setAudioOutput(self.audio_output)
+        self.audio_output.setVolume(0.8)
 
     def get_reminder_config(self):
         """
@@ -94,6 +122,7 @@ class ReminderManager:
         """
         self.notify_pet_reminding(title)
         self.notify_tray_reminding(title, remind_time)
+        self.play_reminder_sound()
 
         reminder_config = self.get_reminder_config()
 
@@ -205,6 +234,48 @@ class ReminderManager:
         if auto_focus:
             dialog.raise_()
             dialog.activateWindow()
+
+    def play_sound_file(self, sound_path):
+        """
+        播放指定音频文件。
+        """
+        path = Path(sound_path)
+
+        if not path.exists():
+            QApplication.beep()
+            return
+
+        self.sound_player.stop()
+        self.sound_player.setSource(QUrl.fromLocalFile(str(path)))
+        self.sound_player.play()
+
+    def play_reminder_sound(self):
+        """
+        播放提醒音效。
+
+        优先播放 assets/sounds/reminders 中配置的音频文件；
+        未选择或文件不存在时，回退到系统提示音。
+        """
+        reminder_config = self.get_reminder_config()
+
+        if not reminder_config.get("reminder_sound_enabled", True):
+            return
+
+        sound_file = str(reminder_config.get("reminder_sound_file", "") or "").strip()
+
+        # 兼容旧配置：如果以前保存过绝对路径，也尽量能播放
+        old_sound_path = str(reminder_config.get("reminder_sound_path", "") or "").strip()
+
+        if sound_file:
+            sound_path = REMINDER_SOUNDS_DIR / sound_file
+            self.play_sound_file(sound_path)
+            return
+
+        if old_sound_path:
+            self.play_sound_file(old_sound_path)
+            return
+
+        QApplication.beep()
 
     def handle_done(self, task_id, title, remind_time=None, repeat_interval_minutes=None):
         """
