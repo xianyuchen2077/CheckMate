@@ -17,6 +17,10 @@ DEFAULT_CONFIG = {
         "check_data_guard_on_startup": True,
         "refresh_tasks_on_startup": True,
     },
+    "data_management": {
+        "auto_backup_on_startup": True,
+        "auto_backup_keep_count": 5,
+    },
     "pet": {
         "visible": True,
         "opacity": 1.0,
@@ -94,13 +98,9 @@ def merge_config(default_config, user_config):
 
     return result
 
-
-
 def get_general_config():
     config = load_config()
     return config["general"]
-
-
 def update_general_config(**kwargs):
     """
     更新常规配置。
@@ -116,11 +116,28 @@ def update_general_config(**kwargs):
 
     save_config(config)
 
+def get_data_management_config():
+    """
+    获取数据管理配置。
+    """
+    config = load_config()
+    return config["data_management"]
+
+
+def update_data_management_config(**kwargs):
+    """
+    更新数据管理配置。
+    """
+    config = load_config()
+
+    for key, value in kwargs.items():
+        config["data_management"][key] = value
+
+    save_config(config)
 
 def get_pet_config():
     config = load_config()
     return config["pet"]
-
 
 def update_pet_config(**kwargs):
     """

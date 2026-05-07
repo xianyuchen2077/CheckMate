@@ -69,18 +69,16 @@ def create_backup(prefix=AUTO_BACKUP_PREFIX):
 
     return backup_path
 
-
-def create_auto_backup():
+def create_auto_backup(max_count=MAX_AUTO_BACKUPS):
     """
-    创建自动备份，并清理旧的自动备份。
+    创建自动备份，并按配置数量清理旧自动备份。
     """
     backup_path = create_backup(AUTO_BACKUP_PREFIX)
 
     if backup_path is not None:
-        cleanup_old_auto_backups()
+        cleanup_old_auto_backups(max_count=max_count)
 
     return backup_path
-
 
 def create_manual_backup():
     """
@@ -88,7 +86,6 @@ def create_manual_backup():
     后续可以接到设置页面或托盘菜单。
     """
     return create_backup(MANUAL_BACKUP_PREFIX)
-
 
 def list_auto_backups():
     """

@@ -1,6 +1,7 @@
 # data_guard/startup_guard.py
 
 from data_guard.backup_manager import (
+    MAX_AUTO_BACKUPS,
     create_auto_backup,
     create_suspicious_backup,
     cleanup_special_backups,
@@ -56,7 +57,10 @@ def build_startup_guard_result(
     }
 
 
-def run_startup_data_guard():
+def run_startup_data_guard(
+    auto_backup_enabled=True,
+    max_auto_backups=MAX_AUTO_BACKUPS,
+):
     """
     程序启动时的数据安全检查流程。
 
@@ -64,6 +68,14 @@ def run_startup_data_guard():
         dict，包含当前数据安全状态。
     """
     try:
+        try:
+            max_auto_backups = int(max_auto_backups)
+        except (TypeError, ValueError):
+            max_auto_backups = MAX_AUTO_BACKUPS
+
+        if max_auto_backups <= 0:
+            max_auto_backups = MAX_AUTO_BACKUPS
+
         integrity_result = check_integrity()
         integrity_status = integrity_result["status"]
 
@@ -102,8 +114,13 @@ def run_startup_data_guard():
         if integrity_status == "missing_record":
             log_info(f"数据完整性：{integrity_result['message']}")
 
-            auto_backup_path = create_auto_backup()
-            log_info(f"自动备份结果：{auto_backup_path}")
+            auto_backup_path = None
+
+            if auto_backup_enabled:
+                auto_backup_path = create_auto_backup(max_count=max_auto_backups)
+                log_info(f"自动备份结果：{auto_backup_path}")
+            else:
+                log_info("启动时自动备份已被设置关闭。")
 
             cleanup_result = cleanup_special_backups()
             log_info(f"特殊备份清理结果：{cleanup_result}")

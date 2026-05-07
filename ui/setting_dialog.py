@@ -52,6 +52,16 @@ from data_guard.integrity_manager import (
 
 GITHUB_REPO_URL = "https://github.com/xianyuchen2077/CheckMate"
 GITHUB_RELEASE_URL = "https://github.com/xianyuchen2077/CheckMate/releases"
+class NoWheelComboBox(QComboBox):
+    """
+    禁止鼠标滚轮直接切换选项的下拉框。
+
+    目的：
+        避免鼠标悬停在下拉框上时，
+        滚动页面却误改了设置项。
+    """
+    def wheelEvent(self, event):
+        event.ignore()
 
 class SettingsDialog(QDialog):
     """
@@ -95,6 +105,8 @@ class SettingsDialog(QDialog):
         self.latest_backup_label = None
         self.database_status_label = None
         self.backup_count_label = None
+        self.startup_auto_backup_switch = None
+        self.auto_backup_keep_combo = None
 
         self.setWindowTitle("设置 - CheckMate")
         self.setFixedSize(780, 540)
@@ -549,6 +561,16 @@ class SettingsDialog(QDialog):
 
         container = page.findChild(QWidget, "pageContent")
 
+        data_config = config_manager.get_data_management_config()
+
+        auto_backup_on_startup = bool(
+            data_config.get("auto_backup_on_startup", True)
+        )
+
+        auto_backup_keep_count = int(
+            data_config.get("auto_backup_keep_count", 5)
+        )
+
         self.data_file_label = self.add_info_row(
             container,
             title="当前数据文件",
@@ -579,19 +601,28 @@ class SettingsDialog(QDialog):
             value="读取中...",
         )
 
-        self.add_switch_row(
+        self.startup_auto_backup_switch = self.add_switch_row(
             container,
             title="启动时自动备份",
-            description="程序启动时自动备份当前数据库。当前版本暂时保留为 UI 设置项，实际启动流程仍以 data_guard 为准。",
-            checked=True,
+            description="程序启动时自动创建一份当前数据库备份。数据库异常时的可疑备份不受此开关影响。",
+            checked=auto_backup_on_startup,
         )
 
-        self.add_combo_row(
+        keep_items = ["保留 3 个", "保留 5 个", "保留 10 个", "保留 20 个"]
+
+        keep_count_to_index = {
+            3: 0,
+            5: 1,
+            10: 2,
+            20: 3,
+        }
+
+        self.auto_backup_keep_combo = self.add_combo_row(
             container,
             title="自动备份保留数量",
-            description="超过数量后可清理较旧的自动备份。当前底层默认保留最近 5 个自动备份。",
-            items=["保留 5 个", "保留 10 个", "保留 20 个", "不自动清理"],
-            current_index=0,
+            description="超过数量后，启动自动备份会清理较旧的自动备份。",
+            items=keep_items,
+            current_index=keep_count_to_index.get(auto_backup_keep_count, 0),
         )
 
         folder_buttons = self.create_button_row(
@@ -826,6 +857,7 @@ class SettingsDialog(QDialog):
         scroll_area.setObjectName("settingsScroll")
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        # scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         page = QWidget()
         page.setObjectName("settingsPage")
@@ -933,7 +965,7 @@ class SettingsDialog(QDialog):
         text_layout.addWidget(title_label)
         text_layout.addWidget(desc_label)
 
-        combo = QComboBox()
+        combo = NoWheelComboBox()
         combo.setObjectName("settingCombo")
         combo.addItems(items)
         combo.setCurrentIndex(current_index)
@@ -1182,6 +1214,7 @@ class SettingsDialog(QDialog):
 
         self.apply_auto_start_setting()
         self.apply_general_settings()
+        self.apply_data_management_settings()
 
         # Debug 输出当前设置状态
         # print(
@@ -1316,8 +1349,26 @@ class SettingsDialog(QDialog):
             return "暂无备份"
 
         latest = backups[0]
-        return str(latest)
 
+        return self.format_path_for_display(latest)
+
+    def format_path_for_display(self, path):
+        """
+        格式化长路径的显示文本。
+
+        只影响 UI 显示，不影响真实文件路径。
+        为了避免路径过长导致设置页出现横向滚动条，
+        在 CheckMate 后面主动换行。
+        """
+        path_text = str(path)
+
+        if "CheckMate\\" in path_text:
+            return path_text.replace("CheckMate\\", "CheckMate\n\\", 1)
+
+        if "CheckMate/" in path_text:
+            return path_text.replace("CheckMate/", "CheckMate\n/", 1)
+
+        return path_text
 
     def get_backup_count_text(self):
         """
@@ -1381,12 +1432,12 @@ class SettingsDialog(QDialog):
 
         self.set_label_value(
             self.data_file_label,
-            get_database_path()
+            self.format_path_for_display(get_database_path())
         )
 
         self.set_label_value(
             self.backup_folder_label,
-            get_backup_dir()
+            self.format_path_for_display(get_backup_dir())
         )
 
         self.set_label_value(
@@ -1403,7 +1454,6 @@ class SettingsDialog(QDialog):
             self.backup_count_label,
             self.get_backup_count_text()
         )
-
 
     def create_manual_database_backup(self):
         """
@@ -1427,7 +1477,7 @@ class SettingsDialog(QDialog):
         QMessageBox.information(
             self,
             "备份成功",
-            f"已创建手动备份：\n{backup_path}"
+            f"已创建手动备份：\n{self.format_path_for_display(backup_path)}"
         )
 
 
@@ -1492,8 +1542,8 @@ class SettingsDialog(QDialog):
             "恢复成功",
             (
                 f"{result.get('message')}\n\n"
-                f"恢复来源：\n{result.get('backup_path')}\n\n"
-                f"恢复前备份：\n{result.get('before_restore_backup')}"
+                f"恢复来源：\n{self.format_path_for_display(result.get('backup_path'))}\n\n"
+                f"恢复前备份：\n{self.format_path_for_display(result.get('before_restore_backup'))}"
             )
         )
 
@@ -1631,22 +1681,33 @@ class SettingsDialog(QDialog):
             "导入成功",
             (
                 "数据库已导入并设为可信状态。\n\n"
-                f"导入来源：\n{result.get('backup_path')}\n\n"
-                f"导入前备份：\n{result.get('before_restore_backup')}"
+                f"导入来源：\n{self.format_path_for_display(result.get('backup_path'))}\n\n"
+                f"导入前备份：\n{self.format_path_for_display(result.get('before_restore_backup'))}"
             )
         )
 
-
     def cleanup_old_auto_backups_from_settings(self):
         """
-        清理旧自动备份，只保留最近 MAX_AUTO_BACKUPS 个。
+        清理旧自动备份，只保留设置中指定的数量。
         """
+        data_config = config_manager.get_data_management_config()
+
+        try:
+            keep_count = int(
+                data_config.get("auto_backup_keep_count", MAX_AUTO_BACKUPS)
+            )
+        except (TypeError, ValueError):
+            keep_count = MAX_AUTO_BACKUPS
+
+        if keep_count <= 0:
+            keep_count = MAX_AUTO_BACKUPS
+
         reply = QMessageBox.question(
             self,
             "确认清理旧备份",
             (
                 f"确定要清理旧自动备份吗？\n\n"
-                f"当前规则：只保留最近 {MAX_AUTO_BACKUPS} 个自动备份。"
+                f"当前规则：只保留最近 {keep_count} 个自动备份。"
             ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -1657,7 +1718,7 @@ class SettingsDialog(QDialog):
 
         deleted_count = cleanup_backups_by_count(
             AUTO_BACKUP_PREFIX,
-            MAX_AUTO_BACKUPS
+            keep_count
         )
 
         self.refresh_data_management_info()
@@ -1667,7 +1728,6 @@ class SettingsDialog(QDialog):
             "清理完成",
             f"已清理旧自动备份 {deleted_count} 个。"
         )
-
 
     def cleanup_suspicious_backups_from_settings(self):
         """
@@ -1695,6 +1755,32 @@ class SettingsDialog(QDialog):
             self,
             "清理完成",
             f"已清理可疑备份 {deleted_count} 个。"
+        )
+
+    def apply_data_management_settings(self):
+        """
+        应用数据管理设置。
+        """
+        if (
+            self.startup_auto_backup_switch is None
+            or self.auto_backup_keep_combo is None
+        ):
+            return
+
+        keep_text = self.auto_backup_keep_combo.currentText()
+
+        keep_count_map = {
+            "保留 3 个": 3,
+            "保留 5 个": 5,
+            "保留 10 个": 10,
+            "保留 20 个": 20,
+        }
+
+        keep_count = keep_count_map.get(keep_text, 5)
+
+        config_manager.update_data_management_config(
+            auto_backup_on_startup=self.startup_auto_backup_switch.isChecked(),
+            auto_backup_keep_count=keep_count,
         )
 
     def move_pet_to_bottom_right(self):

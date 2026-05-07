@@ -87,7 +87,16 @@ class MainWindow(QMainWindow):
             log_info("启动时每日刷新已被设置关闭。")
 
         if general_config.get("check_data_guard_on_startup", True):
-            self.data_guard_result = run_startup_data_guard()
+            data_config = config_manager.get_data_management_config()
+
+            self.data_guard_result = run_startup_data_guard(
+                auto_backup_enabled=bool(
+                    data_config.get("auto_backup_on_startup", True)
+                ),
+                max_auto_backups=int(
+                    data_config.get("auto_backup_keep_count", 5)
+                ),
+            )
         else:
             self.data_guard_result = None
             log_info("启动时数据安全检查已被设置关闭。")
