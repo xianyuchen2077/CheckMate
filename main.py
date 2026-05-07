@@ -4,6 +4,7 @@ from pathlib import Path
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import QApplication
 
+from app_identity import setup_windows_app_identity
 from main_window import MainWindow
 import config_manager
 
@@ -30,7 +31,13 @@ def get_app_icon_path():
 
 
 def main():
+    setup_windows_app_identity()
+
     app = QApplication(sys.argv)
+    app.setApplicationName("CheckMate")
+    app.setApplicationDisplayName("CheckMate")
+    app.setOrganizationName("XianYu")
+
     app.setQuitOnLastWindowClosed(False)
 
     font = QFont("Microsoft YaHei", 10)

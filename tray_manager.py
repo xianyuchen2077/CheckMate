@@ -25,6 +25,31 @@ def get_base_dir():
     return Path(__file__).resolve().parent
 
 
+def get_assets_dir():
+    """
+    获取 assets 目录。
+
+    开发环境：
+        项目根目录/assets
+
+    PyInstaller onedir：
+        可能是 exe 同级 assets
+        也可能是 _internal/assets
+    """
+    base_dir = get_base_dir()
+
+    candidates = [
+        base_dir / "assets",
+        base_dir / "_internal" / "assets",
+    ]
+
+    for path in candidates:
+        if path.exists():
+            return path
+
+    return candidates[0]
+
+
 def get_icon(icon_name="checkmate_icon.png"):
     """
     获取指定图标。
@@ -32,14 +57,20 @@ def get_icon(icon_name="checkmate_icon.png"):
     icon_name:
         assets/icons/ 下的文件名。
     """
-    icon_path = get_base_dir() / "assets" / "icons" / icon_name
+    assets_dir = get_assets_dir()
+    icon_path = assets_dir / "icons" / icon_name
 
-    # Debug 输出图标路径和存在性检查
-    # print("[TrayManager] 尝试加载图标：", icon_path)
-    # print("[TrayManager] 图标是否存在：", icon_path.exists())
+    # Debug 输出路径信息，帮助排查图标加载问题
+    print("[TrayManager] assets_dir =", assets_dir)
+    print("[TrayManager] icon_path =", icon_path)
+    print("[TrayManager] exists =", icon_path.exists())
+
 
     if icon_path.exists():
-        return QIcon(str(icon_path))
+        icon = QIcon(str(icon_path))
+
+        if not icon.isNull():
+            return icon
 
     return None
 
@@ -172,7 +203,7 @@ class TrayManager:
         # 通知发出后恢复默认托盘图标
         if self.default_icon is not None:
             QTimer.singleShot(
-                1200,
+                max(duration, 1200),
                 self.restore_default_icon
             )
 

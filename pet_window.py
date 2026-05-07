@@ -1,6 +1,7 @@
 from pathlib import Path
 import random
 import sys
+import time
 
 import database
 import config_manager
@@ -53,12 +54,18 @@ class PetWindow(QWidget):
         self.is_reminding = False
         self.is_status_locked = False
         self.press_global_pos = QPoint()
+        self.drag_started = False
+        self.click_move_threshold = 10
+
+        self.main_window_focus_grace_until = 0.0
+        self.pet_click_mode_until = 0.0
 
         # 宠物连点彩蛋：
         # 5 秒内连续点击 15 次及以上触发
         self.pet_easter_click_count = 0
         self.pet_easter_first_click_time = None
         self.is_pet_easter_mode = False
+
 
         # 超级赛亚人彩蛋：
         self.is_super_fish_mode = False
@@ -406,6 +413,15 @@ class PetWindow(QWidget):
         self.move(x, y)
 
     def say_random_idle_message(self):
+        if getattr(self, "is_super_fish_mode", False):
+            return
+
+        if getattr(self, "is_pet_easter_mode", False):
+            return
+
+        if getattr(self, "is_status_locked", False):
+            return
+
         self.is_reminding = False
         self.load_pet_image("idle")
         self.pet_text.setText(random.choice(self.idle_messages))
@@ -528,8 +544,13 @@ class PetWindow(QWidget):
 
     def set_idle(self):
         self.is_reminding = False
+        self.is_status_locked = False
+        self.is_pet_easter_mode = False
+        self.is_super_fish_mode = False
+
         self.set_text_color("#405279")
-        self.say_random_idle_message()
+        self.load_pet_image("idle")
+        self.pet_text.setText(random.choice(self.idle_messages))
 
     def set_reminding(self, task_title):
         self.is_reminding = True
@@ -721,6 +742,7 @@ class PetWindow(QWidget):
         self.is_reminding = False
         self.super_fish_finished_callback = on_finished
 
+        self.set_konami_flash_on()
         self.set_text_color("#f97316")
         self.load_pet_image("super_fish")
         self.pet_text.setText("你输入了古老的咒语，鱼开始发光。")
@@ -810,43 +832,96 @@ class PetWindow(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.is_dragging = True
+            self.drag_started = False
+
             self.press_global_pos = event.globalPosition().toPoint()
             self.drag_position = (
                 event.globalPosition().toPoint()
                 - self.frameGeometry().topLeft()
             )
+
             event.accept()
 
     def mouseMoveEvent(self, event):
-        if self.is_dragging and event.buttons() & Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self.drag_position)
+        if not self.is_dragging:
+            return
+
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+
+        current_pos = event.globalPosition().toPoint()
+        moved_distance = (current_pos - self.press_global_pos).manhattanLength()
+
+        # 鼠标抖动距离很小时，不认为是在拖动
+        if moved_distance < self.click_move_threshold:
             event.accept()
+            return
+
+        self.drag_started = True
+        self.move(current_pos - self.drag_position)
+        event.accept()
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            release_pos = event.globalPosition().toPoint()
-            moved_distance = (release_pos - self.press_global_pos).manhattanLength()
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
 
-            self.is_dragging = False
+        release_pos = event.globalPosition().toPoint()
+        moved_distance = (release_pos - self.press_global_pos).manhattanLength()
 
+        self.is_dragging = False
+
+        # 确实拖动过：
+        # 保存宠物位置，并在接下来 3 秒内不再让双击宠物置顶主窗口。
+        if moved_distance >= 5:
             config_manager.update_pet_config(
                 x=self.pos().x(),
                 y=self.pos().y()
             )
 
-            # 移动距离很小，认为是一次单击
-            if moved_distance < 5:
-                self.handle_pet_click_easter_egg()
-
-                if not self.is_pet_easter_mode:
-                    self.say_random_idle_message()
-
+            self.pet_click_mode_until = time.monotonic() + 3.0
             event.accept()
+            return
+
+        # 普通点击：用于宠物连点彩蛋
+        self.handle_pet_click_easter_egg()
+
+        if not self.is_pet_easter_mode:
+            self.say_random_idle_message()
+
+        event.accept()
 
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.open_main_window()
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+
+        main_window = self.main_window
+
+        if main_window is None:
             event.accept()
+            return
+
+        now = time.monotonic()
+
+        # 宠物点击保护期内：
+        # 用户正在操作宠物本体，不再重复唤醒 / 置顶主窗口。
+        if now < self.pet_click_mode_until:
+            event.accept()
+            return
+
+        # 主窗口隐藏 / 最小化：
+        # 第一次双击宠物用于唤醒主窗口。
+        if not main_window.isVisible() or main_window.isMinimized():
+            main_window.bring_main_window_to_front()
+            self.pet_click_mode_until = time.monotonic() + 3.0
+            event.accept()
+            return
+
+        # 主窗口已经显示：
+        # 第一次双击宠物用于置顶主窗口。
+        # 之后 3 秒内继续点宠物，就进入宠物彩蛋点击模式。
+        main_window.bring_main_window_to_front()
+        self.pet_click_mode_until = time.monotonic() + 3.0
+        event.accept()
 
     def show_today_progress(self):
         if self.main_window is not None:
@@ -906,8 +981,12 @@ class PetWindow(QWidget):
         menu.exec(self.mapToGlobal(position))
 
     def open_main_window(self):
-        if self.main_window is not None:
-            self.main_window.show_main_window()
+        main_window = self.main_window
+
+        if main_window is None:
+            return
+
+        main_window.bring_main_window_to_front()
 
     def open_pet_settings(self):
         dialog = PetSettingsDialog(self, self.main_window)

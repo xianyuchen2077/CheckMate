@@ -468,9 +468,33 @@ class MainWindow(QMainWindow):
                 """)
 
     def show_main_window(self):
-        self.show()
+        self.bring_main_window_to_front()
+
+    def bring_main_window_to_front(self):
+        """
+        显示并尽量把主窗口置于前台。
+        """
+        if self.isMinimized():
+            self.showNormal()
+        else:
+            self.show()
+
+        self.setWindowState(
+            self.windowState()
+            & ~Qt.WindowState.WindowMinimized
+            | Qt.WindowState.WindowActive
+        )
+
         self.raise_()
         self.activateWindow()
+
+        # Windows / Qt 下有时第一次 activate 不稳定，延迟再执行几次
+        QTimer.singleShot(0, self.raise_)
+        QTimer.singleShot(0, self.activateWindow)
+        QTimer.singleShot(80, self.raise_)
+        QTimer.singleShot(80, self.activateWindow)
+        QTimer.singleShot(160, self.raise_)
+        QTimer.singleShot(160, self.activateWindow)
 
     def show_pet_window(self):
         if hasattr(self, "pet_window"):
