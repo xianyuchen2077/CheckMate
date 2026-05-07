@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
     QWidget,
+    QStackedWidget,
 )
 
 import database
@@ -32,6 +33,7 @@ from data_guard.startup_guard import run_startup_data_guard
 from data_guard.migration_manager import migrate_legacy_database_if_needed
 from data_guard.logger import log_info
 from ui.setting_dialog import SettingsDialog
+from ui.countdown_page import CountdownPage
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -105,6 +107,11 @@ class MainWindow(QMainWindow):
         self.resize(1050, 700)
 
         self.force_quit = False
+
+        # 左侧主内容区当前页面：
+        # tasks = 今日任务
+        # countdown = 倒计时
+        self.current_main_page = "tasks"
 
         self.konami_code = [
             Qt.Key.Key_Up,
@@ -190,15 +197,51 @@ class MainWindow(QMainWindow):
         task_layout.setSpacing(12)
         task_card.setLayout(task_layout)
 
-        task_title = QLabel("今日任务")
-        task_title.setObjectName("sectionTitle")
+        # 顶部文字菜单：今日任务 / 倒计时
+        main_tab_layout = QHBoxLayout()
+        main_tab_layout.setContentsMargins(8, 0, 0, 0)
+        main_tab_layout.setSpacing(18)
+
+        self.task_tab_frame, self.task_tab_label, self.task_tab_indicator = (
+            self.create_main_tab("今日任务")
+        )
+
+        self.countdown_tab_frame, self.countdown_tab_label, self.countdown_tab_indicator = (
+            self.create_main_tab("倒计时")
+        )
+
+        self.task_tab_frame.mousePressEvent = lambda event: self.switch_main_page("tasks")
+        self.countdown_tab_frame.mousePressEvent = lambda event: self.switch_main_page("countdown")
+
+        main_tab_layout.addWidget(self.task_tab_frame)
+        main_tab_layout.addWidget(self.countdown_tab_frame)
+        main_tab_layout.addStretch()
+
+        task_layout.addLayout(main_tab_layout)
+
+        # 中间内容区：用 QStackedWidget 承载不同页面
+        self.main_content_stack = QStackedWidget()
+
+        task_page = QWidget()
+        task_page_layout = QVBoxLayout()
+        task_page_layout.setContentsMargins(0, 0, 0, 0)
+        task_page_layout.setSpacing(0)
+        task_page.setLayout(task_page_layout)
 
         self.task_list = QListWidget()
         self.task_list.setObjectName("taskList")
         self.task_list.currentItemChanged.connect(self.update_task_detail)
 
-        task_layout.addWidget(task_title)
-        task_layout.addWidget(self.task_list)
+        task_page_layout.addWidget(self.task_list)
+
+        self.countdown_page = CountdownPage(self)
+
+        self.main_content_stack.addWidget(task_page)
+        self.main_content_stack.addWidget(self.countdown_page)
+
+        task_layout.addWidget(self.main_content_stack, 1)
+
+        self.update_main_tab_style()
 
         button_layout = QHBoxLayout()
         button_layout.setSpacing(10)
@@ -321,6 +364,108 @@ class MainWindow(QMainWindow):
 
     def apply_styles(self):
         self.setStyleSheet(get_main_window_style(get_background_path()))
+
+    def create_main_tab(self, text):
+        """
+        创建左侧主内容区顶部文字菜单项。
+
+        使用 QFrame 包一层，是为了给每个文字 tab 一个明确点击区域，
+        后续识别点击更方便。
+        """
+        tab_frame = QFrame()
+        tab_frame.setObjectName("mainTabFrame")
+        tab_frame.setFixedSize(120, 44)
+        tab_frame.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        tab_frame.setLayout(layout)
+
+        label = QLabel(text)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setObjectName("mainTabLabel")
+
+        indicator = QFrame()
+        indicator.setFixedSize(70, 4)
+        indicator.setObjectName("mainTabIndicator")
+
+        indicator_layout = QHBoxLayout()
+        indicator_layout.setContentsMargins(0, 0, 0, 0)
+        indicator_layout.addStretch()
+        indicator_layout.addWidget(indicator)
+        indicator_layout.addStretch()
+
+        layout.addWidget(label)
+        layout.addLayout(indicator_layout)
+
+        return tab_frame, label, indicator
+
+
+    def switch_main_page(self, page_name):
+        """
+        切换左侧主内容区页面。
+        """
+        self.current_main_page = page_name
+
+        if not hasattr(self, "main_content_stack"):
+            return
+
+        if page_name == "tasks":
+            self.main_content_stack.setCurrentIndex(0)
+        elif page_name == "countdown":
+            self.main_content_stack.setCurrentIndex(1)
+
+        self.update_main_tab_style()
+
+
+    def update_main_tab_style(self):
+        """
+        更新“今日任务 / 倒计时”文字菜单样式。
+        """
+        if not hasattr(self, "task_tab_label"):
+            return
+
+        tabs = [
+            ("tasks", self.task_tab_label, self.task_tab_indicator),
+            ("countdown", self.countdown_tab_label, self.countdown_tab_indicator),
+        ]
+
+        for page_name, label, indicator in tabs:
+            is_active = self.current_main_page == page_name
+
+            if is_active:
+                label.setStyleSheet("""
+                    QLabel {
+                        color: #111827;
+                        font-size: 22px;
+                        font-weight: 800;
+                        background-color: transparent;
+                    }
+                """)
+
+                indicator.setStyleSheet("""
+                    QFrame {
+                        background-color: #2563eb;
+                        border-radius: 2px;
+                    }
+                """)
+            else:
+                label.setStyleSheet("""
+                    QLabel {
+                        color: #6b7280;
+                        font-size: 21px;
+                        font-weight: 700;
+                        background-color: transparent;
+                    }
+                """)
+
+                indicator.setStyleSheet("""
+                    QFrame {
+                        background-color: transparent;
+                        border-radius: 2px;
+                    }
+                """)
 
     def show_main_window(self):
         self.show()
