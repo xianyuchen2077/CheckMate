@@ -61,9 +61,9 @@ def get_icon(icon_name="checkmate_icon.png"):
     icon_path = assets_dir / "icons" / icon_name
 
     # Debug 输出路径信息，帮助排查图标加载问题
-    print("[TrayManager] assets_dir =", assets_dir)
-    print("[TrayManager] icon_path =", icon_path)
-    print("[TrayManager] exists =", icon_path.exists())
+    # print("[TrayManager] assets_dir =", assets_dir)
+    # print("[TrayManager] icon_path =", icon_path)
+    # print("[TrayManager] exists =", icon_path.exists())
 
 
     if icon_path.exists():
@@ -78,7 +78,13 @@ def get_icon(icon_name="checkmate_icon.png"):
 def get_tray_icon():
     """
     获取默认托盘图标。
+    Windows 下优先使用 ico，失败再回退 png。
     """
+    icon = get_icon("checkmate_icon.ico")
+
+    if icon is not None:
+        return icon
+
     return get_icon("checkmate_icon.png")
 
 
@@ -177,30 +183,47 @@ class TrayManager:
         """
         显示系统托盘通知。
 
-        icon_type:
-            default
-            reminder
-            done
-            snooze
-            warning
-            success
+        目标：
+            1. 托盘小图标临时切换
+            2. Windows 通知尽量使用 CheckMate 自定义图标
+            3. 通知结束后恢复默认托盘图标
         """
         if self.tray_icon is None:
             return
 
         icon = self.get_notification_icon(icon_type)
 
+        if icon is None:
+            icon = self.default_icon
+
         if icon is not None:
             self.tray_icon.setIcon(icon)
 
-        self.tray_icon.showMessage(
-            title,
-            message,
-            QSystemTrayIcon.MessageIcon.NoIcon,
-            duration
-        )
+        # 优先使用 QIcon 版本的 showMessage，让通知卡片尽量使用自定义图标
+        if icon is not None and not icon.isNull():
+            try:
+                self.tray_icon.showMessage(
+                    title,
+                    message,
+                    icon,
+                    duration
+                )
+            except TypeError:
+                # 某些 PySide6 版本如果不支持 QIcon 重载，就退回 NoIcon
+                self.tray_icon.showMessage(
+                    title,
+                    message,
+                    QSystemTrayIcon.MessageIcon.NoIcon,
+                    duration
+                )
+        else:
+            self.tray_icon.showMessage(
+                title,
+                message,
+                QSystemTrayIcon.MessageIcon.NoIcon,
+                duration
+            )
 
-        # 通知发出后恢复默认托盘图标
         if self.default_icon is not None:
             QTimer.singleShot(
                 max(duration, 1200),
@@ -226,9 +249,14 @@ class TrayManager:
     def get_notification_icon(self, icon_type):
         """
         根据通知类型获取图标。
+
+        优先级：
+            1. 使用 icon_type 对应的专用通知图标
+            2. 如果专用图标不存在，回退到 checkmate_icon2.png
+            3. 如果 checkmate_icon2.png 也不存在，回退到初始化时的 default_icon
         """
         icon_map = {
-            "default": "checkmate_icon.png",
+            "default": "checkmate_icon2.png",
             "reminder": "notify_reminder.png",
             "done": "notify_done.png",
             "snooze": "notify_snooze.png",
@@ -236,13 +264,19 @@ class TrayManager:
             "success": "notify_success.png",
         }
 
-        icon_name = icon_map.get(icon_type, "checkmate_icon.png")
+        icon_name = icon_map.get(icon_type, "checkmate_icon2.png")
 
+        # 1. 先尝试加载当前通知类型对应的图标
         icon = get_icon(icon_name)
 
         if icon is not None:
             return icon
 
-        # print("[TrayManager] 图标加载失败，回退默认图标")
+        # 2. 当前类型图标不存在时，统一回退到 CheckMate 默认图标
+        fallback_icon = get_icon("checkmate_icon2.png")
 
+        if fallback_icon is not None:
+            return fallback_icon
+
+        # 3. 最后回退到托盘初始化时保存的默认图标
         return self.default_icon

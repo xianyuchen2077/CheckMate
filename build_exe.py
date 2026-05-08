@@ -6,6 +6,9 @@ from pathlib import Path
 
 APP_NAME = "CheckMate"
 
+# 必须和 app_identity.py 里的 APP_USER_MODEL_ID 保持一致
+APP_USER_MODEL_ID = "CheckMate"
+
 PROJECT_DIR = Path(__file__).resolve().parent
 MAIN_FILE = PROJECT_DIR / "main.py"
 
@@ -27,8 +30,21 @@ BUILD_DIR = PROJECT_DIR / "build"
 # 最终发布目录，之后只运行这里面的 exe
 RELEASE_DIR = PROJECT_DIR / "release"
 
-# 快捷方式输出位置
+# release 快捷方式输出位置
 SHORTCUT_FILE = RELEASE_DIR / f"{APP_NAME}.lnk"
+
+# 开始菜单快捷方式位置
+START_MENU_DIR = (
+    Path.home()
+    / "AppData"
+    / "Roaming"
+    / "Microsoft"
+    / "Windows"
+    / "Start Menu"
+    / "Programs"
+)
+
+START_MENU_SHORTCUT_FILE = START_MENU_DIR / f"{APP_NAME}.lnk"
 
 # PyInstaller 默认会生成 spec 文件
 SPEC_FILE = PROJECT_DIR / f"{APP_NAME}.spec"
@@ -66,7 +82,7 @@ def ensure_pyinstaller():
 
 def ensure_pywin32():
     """
-    确保 pywin32 可用，用于创建 Windows 快捷方式。
+    确保 pywin32 可用，用于创建 Windows 快捷方式和写入 AppUserModelID。
     """
     try:
         import win32com.client  # noqa: F401
@@ -183,6 +199,19 @@ def build_exe():
         # 清理 PyInstaller 缓存
         "--clean",
 
+        # PySide6 多媒体模块：提醒音效需要 QMediaPlayer / QAudioOutput
+        "--hidden-import",
+        "PySide6.QtMultimedia",
+
+        "--hidden-import",
+        "PySide6.QtMultimediaWidgets",
+
+        "--collect-submodules",
+        "PySide6.QtMultimedia",
+
+        "--collect-data",
+        "PySide6.QtMultimedia",
+
         # 明确指定临时构建目录
         "--workpath",
         str(BUILD_DIR),
@@ -298,6 +327,33 @@ def check_assets_result():
 
     print(f"assets 已打包：{assets_dir}")
 
+    icons_dir = assets_dir / "icons"
+
+    if icons_dir.exists():
+        print(f"图标目录已打包：{icons_dir}")
+
+        expected_icons = [
+            "checkmate_icon.png",
+            "checkmate_icon.ico",
+            "checkmate_shortcut_icon.png",
+            "checkmate_shortcut_icon.ico",
+            "notify_reminder.png",
+            "notify_done.png",
+            "notify_snooze.png",
+            "notify_warning.png",
+            "notify_success.png",
+        ]
+
+        for icon_name in expected_icons:
+            icon_path = icons_dir / icon_name
+
+            if icon_path.exists():
+                print(f"  √ {icon_name}")
+            else:
+                print(f"  × 缺少 {icon_name}")
+    else:
+        print("警告：release 中没有找到 assets/icons。")
+
     sound_dir = assets_dir / "sounds" / "reminders"
 
     if not sound_dir.exists():
@@ -322,23 +378,65 @@ def check_assets_result():
         print(f"  - {file_name}")
 
 
-def create_release_shortcut():
+def set_shortcut_app_user_model_id(shortcut_path):
     """
-    在 release 目录下创建 CheckMate 快捷方式。
+    给 Windows 快捷方式写入 AppUserModelID。
 
-    快捷方式位置：
-        release/CheckMate.lnk
+    作用：
+        1. 让 Windows 通知系统能把通知归类到 CheckMate。
+        2. 避免通知顶部显示 NotifyIconGeneratedAumid_xxx。
+        3. 有助于通知顶部小图标识别。
+    """
+    if not shortcut_path.exists():
+        print(f"快捷方式不存在，无法写入 AppUserModelID：{shortcut_path}")
+        return
 
-    指向：
-        release/CheckMate/CheckMate.exe
+    try:
+        import pythoncom
+        from win32com.propsys import propsys, pscon
 
-    图标：
-        assets/icons/checkmate_shortcut_icon.ico
+        stgm_readwrite = getattr(pythoncom, "STGM_READWRITE", 0x00000002)
+
+        property_store = propsys.SHGetPropertyStoreFromParsingName(
+            str(shortcut_path),
+            None,
+            stgm_readwrite,
+            propsys.IID_IPropertyStore
+        )
+
+        try:
+            value = propsys.PROPVARIANTType(
+                APP_USER_MODEL_ID,
+                pythoncom.VT_LPWSTR
+            )
+        except TypeError:
+            value = propsys.PROPVARIANTType(APP_USER_MODEL_ID)
+
+        property_store.SetValue(pscon.PKEY_AppUserModel_ID, value)
+        property_store.Commit()
+
+        print(f"已写入 AppUserModelID：{APP_USER_MODEL_ID}")
+        print(f"目标快捷方式：{shortcut_path}")
+
+    except Exception as e:
+        print("警告：写入 AppUserModelID 失败。")
+        print(f"快捷方式：{shortcut_path}")
+        print(f"错误信息：{e}")
+
+
+def create_shortcut(shortcut_file, label):
+    """
+    创建一个指向 release/CheckMate/CheckMate.exe 的快捷方式。
+
+    快捷方式图标优先使用 exe 内嵌图标：
+        IconLocation = release/CheckMate/CheckMate.exe,0
+
+    这样发布时不依赖开发目录下的 ico 文件。
     """
     exe_path = get_release_exe_path()
 
     if not exe_path.exists():
-        print("\n未找到 exe，无法创建快捷方式：")
+        print(f"\n未找到 exe，无法创建{label}快捷方式：")
         print(exe_path)
         return
 
@@ -349,28 +447,53 @@ def create_release_shortcut():
         print("请先运行：pip install pywin32")
         return
 
-    SHORTCUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    shortcut_file.parent.mkdir(parents=True, exist_ok=True)
 
     shell = win32com.client.Dispatch("WScript.Shell")
-    shortcut = shell.CreateShortcut(str(SHORTCUT_FILE))
+    shortcut = shell.CreateShortcut(str(shortcut_file))
 
     shortcut.TargetPath = str(exe_path)
     shortcut.WorkingDirectory = str(exe_path.parent)
     shortcut.Description = "CheckMate - 不要成为咸鱼"
 
-    if SHORTCUT_ICON_ICO_FILE.exists():
-        shortcut.IconLocation = str(SHORTCUT_ICON_ICO_FILE)
-        print(f"快捷方式将使用专用图标：{SHORTCUT_ICON_ICO_FILE}")
-    elif ICON_ICO_FILE.exists():
-        shortcut.IconLocation = str(ICON_ICO_FILE)
-        print(f"未找到快捷方式专用图标，回退使用 exe 图标：{ICON_ICO_FILE}")
-    else:
-        print("未找到 ico 图标，快捷方式将使用默认图标。")
+    # 优先使用 exe 内嵌图标。
+    # 这个比引用开发目录里的 ico 更适合发布。
+    shortcut.IconLocation = f"{exe_path},0"
 
     shortcut.Save()
 
-    print("\n已创建快捷方式：")
-    print(SHORTCUT_FILE)
+    print(f"\n已创建{label}快捷方式：")
+    print(shortcut_file)
+
+    set_shortcut_app_user_model_id(shortcut_file)
+
+
+def create_release_shortcut():
+    """
+    在 release 目录下创建 CheckMate 快捷方式。
+
+    快捷方式位置：
+        release/CheckMate.lnk
+
+    指向：
+        release/CheckMate/CheckMate.exe
+    """
+    create_shortcut(
+        SHORTCUT_FILE,
+        label="release"
+    )
+
+
+def create_start_menu_shortcut():
+    """
+    在当前用户开始菜单中创建 CheckMate 快捷方式。
+
+    这个快捷方式对 Windows 通通知别 AppUserModelID 很重要。
+    """
+    create_shortcut(
+        START_MENU_SHORTCUT_FILE,
+        label="开始菜单"
+    )
 
 
 def clean_temp_build_dir():
@@ -398,6 +521,7 @@ def main():
     check_build_result()
     check_assets_result()
     create_release_shortcut()
+    create_start_menu_shortcut()
     clean_temp_build_dir()
 
 

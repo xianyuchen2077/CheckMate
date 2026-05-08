@@ -22,10 +22,18 @@ def get_base_dir():
 
 
 def get_app_icon_path():
-    icon_path = get_base_dir() / "assets" / "icons" / "checkmate_icon.png"
+    base_dir = get_base_dir()
 
-    if icon_path.exists():
-        return str(icon_path)
+    candidates = [
+        base_dir / "assets" / "icons" / "checkmate_icon.ico",
+        base_dir / "assets" / "icons" / "checkmate_icon2.ico",
+        base_dir / "assets" / "icons" / "checkmate_icon.png",
+        base_dir / "assets" / "icons" / "checkmate_icon2.png",
+    ]
+
+    for path in candidates:
+        if path.exists():
+            return str(path)
 
     return None
 
