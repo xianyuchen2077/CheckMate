@@ -63,6 +63,134 @@ class ReminderManager:
         """
         return config_manager.get_reminder_config()
 
+    def parse_time_text(self, time_text):
+        """
+        解析 HH:mm 文本为 time 对象。
+        """
+        try:
+            return datetime.strptime(str(time_text).strip(), "%H:%M").time()
+        except (TypeError, ValueError):
+            return None
+
+    def parse_quiet_range_text(self, quiet_range):
+        """
+        解析静默时段预设文本。
+
+        支持：
+            22-8
+            00-6
+            00-7
+            00-8
+            12-14
+
+        返回：
+            (start_time_text, end_time_text)
+        """
+        quiet_range = str(quiet_range).strip()
+
+        preset_map = {
+            "22-8": ("22:00", "08:00"),
+            "00-6": ("00:00", "06:00"),
+            "00-7": ("00:00", "07:00"),
+            "00-8": ("00:00", "08:00"),
+            "12-14": ("12:00", "14:00"),
+        }
+
+        return preset_map.get(quiet_range)
+
+    def is_time_in_range(self, now_time, start_time, end_time):
+        """
+        判断 now_time 是否处于 start_time 到 end_time 之间。
+
+        支持跨天：
+            22:00 - 08:00
+
+        支持不跨天：
+            12:00 - 14:00
+        """
+        if start_time is None or end_time is None:
+            return False
+
+        # start == end 时，视为全天静默
+        if start_time == end_time:
+            return True
+
+        # 不跨天，例如 12:00 - 14:00
+        if start_time < end_time:
+            return start_time <= now_time < end_time
+
+        # 跨天，例如 22:00 - 08:00
+        return now_time >= start_time or now_time < end_time
+
+    def is_now_in_quiet_hours(self):
+        """
+        判断当前是否处于静默时段。
+        """
+        reminder_config = self.get_reminder_config()
+
+        if not reminder_config.get("quiet_hours_enabled", False):
+            return False
+
+        quiet_range = str(
+            reminder_config.get("quiet_hours_range", "22-8")
+        ).strip()
+
+        # 全天静默
+        if quiet_range == "全天静默":
+            return True
+
+        # 自定义静默
+        if quiet_range == "自定义":
+            start_text = str(
+                reminder_config.get("quiet_hours_custom_start", "22:00")
+            )
+
+            end_text = str(
+                reminder_config.get("quiet_hours_custom_end", "08:00")
+            )
+        else:
+            parsed_range = self.parse_quiet_range_text(quiet_range)
+
+            if parsed_range is None:
+                return False
+
+            start_text, end_text = parsed_range
+
+        start_time = self.parse_time_text(start_text)
+        end_time = self.parse_time_text(end_text)
+
+        now_time = datetime.now().time()
+
+        return self.is_time_in_range(
+            now_time,
+            start_time,
+            end_time
+        )
+
+    def handle_quiet_reminder(self, task_id, title, remind_time, repeat_interval_minutes=None):
+        """
+        静默时段内到点提醒的处理。
+
+        规则：
+            1. 不弹提醒窗口
+            2. 不发系统通知
+            3. 不播放声音
+            4. 不切换宠物提醒状态
+            5. 重复提醒任务继续安排下一轮
+            6. 普通任务保持未完成状态
+        """
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText(
+                f"当前处于静默时段，已暂不打扰：{title}"
+            )
+
+        self.schedule_repeat_if_needed(
+            task_id,
+            title,
+            remind_time,
+            repeat_interval_minutes
+        )
+
     def start(self):
         """
         启动提醒检查定时器。
@@ -120,11 +248,20 @@ class ReminderManager:
         如果任务设置了重复提醒，且用户没有完成任务、没有选择稍后提醒，
         则在弹窗关闭后安排下一次重复提醒。
         """
+        reminder_config = self.get_reminder_config()
+
+        if self.is_now_in_quiet_hours():
+            self.handle_quiet_reminder(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes
+            )
+            return
+
         self.notify_pet_reminding(title)
         self.notify_tray_reminding(title, remind_time)
         self.play_reminder_sound()
-
-        reminder_config = self.get_reminder_config()
 
         # 如果关闭提醒弹窗，则只保留宠物状态 / 系统通知。
         # 对重复提醒任务来说，需要继续安排下一轮，避免提醒链断掉。
@@ -200,6 +337,9 @@ class ReminderManager:
         """
         reminder_config = self.get_reminder_config()
 
+        if self.is_now_in_quiet_hours():
+            return
+
         # 设置中关闭系统通知后，到点提醒不再弹 Windows 托盘通知。
         if not reminder_config.get("show_system_notification", True):
             return
@@ -257,6 +397,9 @@ class ReminderManager:
         未选择或文件不存在时，回退到系统提示音。
         """
         reminder_config = self.get_reminder_config()
+
+        if self.is_now_in_quiet_hours():
+            return
 
         if not reminder_config.get("reminder_sound_enabled", True):
             return
@@ -549,7 +692,7 @@ class ReminderManager:
 
         display_time = snooze_until.strftime("%H:%M")
 
-        if self.tray_manager is not None:
+        if self.tray_manager is not None and not self.is_now_in_quiet_hours():
             self.tray_manager.show_message(
                 "CheckMate",
                 f"好，{display_time} 再提醒你：{title}",
@@ -762,7 +905,7 @@ class ReminderManager:
         delay_ms = repeat_interval_minutes * 60 * 1000
         next_time = datetime.now() + timedelta(minutes=repeat_interval_minutes)
 
-        if self.tray_manager is not None:
+        if self.tray_manager is not None and not self.is_now_in_quiet_hours():
             self.tray_manager.show_message(
                 "CheckMate",
                 f"{repeat_interval_minutes} 分钟后会再次提醒：{title}",

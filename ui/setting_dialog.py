@@ -135,6 +135,13 @@ class SettingsDialog(QDialog):
         self.reminder_sound_file_label = None
         self.selected_reminder_sound_path = ""
         self.reminder_sound_combo = None
+        self.quiet_hours_enabled_switch = None
+        self.quiet_hours_combo = None
+        self.quiet_hours_custom_start_combo = None
+        self.quiet_hours_custom_end_combo = None
+        self.quiet_hours_combo_row = None
+        self.quiet_hours_custom_start_row = None
+        self.quiet_hours_custom_end_row = None
 
         # 宠物设置控件引用
         self.pet_visible_switch = None
@@ -504,21 +511,103 @@ class SettingsDialog(QDialog):
         )
 
 
-        self.add_switch_row(
+        quiet_hours_enabled = bool(
+            reminder_config.get("quiet_hours_enabled", False)
+        )
+
+        quiet_hours_items = [
+            "全天静默",
+            "22-8",
+            "00-6",
+            "00-7",
+            "00-8",
+            "12-14",
+            "自定义",
+        ]
+
+        quiet_hours_range = str(
+            reminder_config.get("quiet_hours_range", "22-8")
+        )
+
+        if quiet_hours_range in quiet_hours_items:
+            quiet_hours_index = quiet_hours_items.index(quiet_hours_range)
+        else:
+            quiet_hours_index = quiet_hours_items.index("自定义")
+
+        self.quiet_hours_enabled_switch = self.add_switch_row(
             container,
             title="启用静默时段",
-            description="在指定时间段内不弹出提醒，只保留任务状态。",
-            checked=False,
+            description="在指定时间段内不弹出提醒、不播放音效、不发送系统通知。",
+            checked=quiet_hours_enabled,
         )
 
-
-        self.add_combo_row(
+        self.quiet_hours_combo = self.add_combo_row(
             container,
             title="静默时段",
-            description="静默期间不主动打扰，后续可接入自定义时间段。",
-            items=["22:00 - 08:00", "23:00 - 07:00", "00:00 - 08:00", "自定义"],
-            current_index=0,
+            description="静默期间不主动打扰，到点任务会保持未完成状态。",
+            items=quiet_hours_items,
+            current_index=quiet_hours_index,
         )
+
+        custom_start = str(
+            reminder_config.get("quiet_hours_custom_start", "22:00")
+        )
+
+        custom_end = str(
+            reminder_config.get("quiet_hours_custom_end", "08:00")
+        )
+
+        custom_time_items = [
+            "00:00", "01:00", "02:00", "03:00",
+            "04:00", "05:00", "06:00", "07:00",
+            "08:00", "09:00", "10:00", "11:00",
+            "12:00", "13:00", "14:00", "15:00",
+            "16:00", "17:00", "18:00", "19:00",
+            "20:00", "21:00", "22:00", "23:00",
+        ]
+
+        if custom_start in custom_time_items:
+            custom_start_index = custom_time_items.index(custom_start)
+        else:
+            custom_start_index = custom_time_items.index("22:00")
+
+        if custom_end in custom_time_items:
+            custom_end_index = custom_time_items.index(custom_end)
+        else:
+            custom_end_index = custom_time_items.index("08:00")
+
+        self.quiet_hours_custom_start_combo = self.add_combo_row(
+            container,
+            title="自定义静默开始",
+            description="当静默时段选择“自定义”时生效。",
+            items=custom_time_items,
+            current_index=custom_start_index,
+        )
+
+        self.quiet_hours_custom_end_combo = self.add_combo_row(
+            container,
+            title="自定义静默结束",
+            description="当静默时段选择“自定义”时生效。",
+            items=custom_time_items,
+            current_index=custom_end_index,
+        )
+
+        # 保存整行引用，方便隐藏 / 显示
+        self.quiet_hours_combo_row = self.quiet_hours_combo.parentWidget()
+        self.quiet_hours_custom_start_row = self.quiet_hours_custom_start_combo.parentWidget()
+        self.quiet_hours_custom_end_row = self.quiet_hours_custom_end_combo.parentWidget()
+
+        # 开关或下拉框变化时，刷新静默设置显示状态
+        self.quiet_hours_enabled_switch.toggled.connect(
+            self.update_quiet_hours_visibility
+        )
+
+        self.quiet_hours_combo.currentTextChanged.connect(
+            lambda value: self.update_quiet_hours_visibility()
+        )
+
+        # 初始化时立即刷新一次显示状态
+        self.update_quiet_hours_visibility()
 
 
         # self.reminder_sound_switch = self.add_switch_row(
@@ -1533,6 +1622,32 @@ class SettingsDialog(QDialog):
         if self.main_window is not None and hasattr(self.main_window, "tip_label"):
             self.main_window.tip_label.setText("已打开提醒音效文件夹。")
 
+    def update_quiet_hours_visibility(self):
+        """
+        根据“启用静默时段”和“静默时段”选项，
+        动态显示 / 隐藏静默相关设置。
+        """
+        if self.quiet_hours_enabled_switch is None:
+            return
+
+        quiet_enabled = self.quiet_hours_enabled_switch.isChecked()
+
+        if self.quiet_hours_combo_row is not None:
+            self.quiet_hours_combo_row.setVisible(quiet_enabled)
+
+        quiet_range = ""
+
+        if self.quiet_hours_combo is not None:
+            quiet_range = self.quiet_hours_combo.currentText()
+
+        show_custom_time = quiet_enabled and quiet_range == "自定义"
+
+        if self.quiet_hours_custom_start_row is not None:
+            self.quiet_hours_custom_start_row.setVisible(show_custom_time)
+
+        if self.quiet_hours_custom_end_row is not None:
+            self.quiet_hours_custom_end_row.setVisible(show_custom_time)
+
     def apply_reminder_settings(self):
         """
         应用提醒设置。
@@ -1546,8 +1661,11 @@ class SettingsDialog(QDialog):
             or self.default_snooze_combo is None
             or self.default_remind_time_combo is None
             or self.default_repeat_interval_combo is None
-            or self.reminder_sound_switch is None
             or self.reminder_sound_combo is None
+            or self.quiet_hours_enabled_switch is None
+            or self.quiet_hours_combo is None
+            or self.quiet_hours_custom_start_combo is None
+            or self.quiet_hours_custom_end_combo is None
         ):
             return
 
@@ -1583,6 +1701,15 @@ class SettingsDialog(QDialog):
         if selected_sound == "系统默认提示音":
             selected_sound = ""
 
+        old_reminder_config = config_manager.get_reminder_config()
+
+        reminder_sound_enabled = bool(
+            old_reminder_config.get("reminder_sound_enabled", True)
+        )
+
+        if self.reminder_sound_switch is not None:
+            reminder_sound_enabled = self.reminder_sound_switch.isChecked()
+
         config_manager.update_reminder_config(
             show_system_notification=self.show_system_notification_switch.isChecked(),
             show_reminder_popup=self.show_reminder_popup_switch.isChecked(),
@@ -1592,9 +1719,18 @@ class SettingsDialog(QDialog):
             default_repeat_interval_minutes=default_repeat_interval_minutes,
             reminder_popup_always_on_top=self.reminder_popup_top_switch.isChecked(),
             reminder_popup_auto_focus=self.reminder_popup_focus_switch.isChecked(),
-            reminder_sound_enabled=self.reminder_sound_switch.isChecked() if self.reminder_sound_switch is not None else True,
+            reminder_sound_enabled=reminder_sound_enabled,
             reminder_sound_file=selected_sound,
+
+            # 静默时段
+            quiet_hours_enabled=self.quiet_hours_enabled_switch.isChecked(),
+            quiet_hours_range=self.quiet_hours_combo.currentText(),
+            quiet_hours_custom_start=self.quiet_hours_custom_start_combo.currentText(),
+            quiet_hours_custom_end=self.quiet_hours_custom_end_combo.currentText(),
         )
+
+        if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+            self.main_window.tip_label.setText("提醒设置已应用。")
 
     def open_folder(self, folder_path):
         """

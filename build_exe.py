@@ -456,9 +456,16 @@ def create_shortcut(shortcut_file, label):
     shortcut.WorkingDirectory = str(exe_path.parent)
     shortcut.Description = "CheckMate - 不要成为咸鱼"
 
-    # 优先使用 exe 内嵌图标。
-    # 这个比引用开发目录里的 ico 更适合发布。
-    shortcut.IconLocation = f"{exe_path},0"
+    # 快捷方式优先使用专用 shortcut 图标
+    if SHORTCUT_ICON_ICO_FILE.exists():
+        shortcut.IconLocation = str(SHORTCUT_ICON_ICO_FILE)
+        print(f"{label}快捷方式将使用专用图标：{SHORTCUT_ICON_ICO_FILE}")
+    elif ICON_ICO_FILE.exists():
+        shortcut.IconLocation = str(ICON_ICO_FILE)
+        print(f"{label}快捷方式未找到专用图标，回退使用 exe 图标文件：{ICON_ICO_FILE}")
+    else:
+        shortcut.IconLocation = f"{exe_path},0"
+        print(f"{label}快捷方式未找到 ico 文件，回退使用 exe 内嵌图标。")
 
     shortcut.Save()
 

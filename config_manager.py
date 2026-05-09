@@ -29,6 +29,10 @@ DEFAULT_CONFIG = {
         "reminder_sound_enabled": True,
         "reminder_sound_path": "",
         "reminder_sound_file": "",
+        "quiet_hours_enabled": False,
+        "quiet_hours_range": "22-8",
+        "quiet_hours_custom_start": "22:00",
+        "quiet_hours_custom_end": "08:00",
     },
     "data_management": {
         "auto_backup_on_startup": True,
