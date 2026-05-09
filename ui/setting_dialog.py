@@ -128,6 +128,7 @@ class SettingsDialog(QDialog):
         self.reminder_popup_focus_switch = None
         self.show_reminder_popup_switch = None
         self.confirm_skip_today_switch = None
+        self.missed_reminder_action_combo = None
         self.default_snooze_combo = None
         self.default_remind_time_combo = None
         self.default_repeat_interval_combo = None
@@ -502,12 +503,30 @@ class SettingsDialog(QDialog):
         )
 
 
-        self.add_combo_row(
+        missed_action = str(
+            reminder_config.get("missed_reminder_action", "repeat")
+        )
+
+        missed_action_items = [
+            "不处理",
+            "5 分钟后再次提醒",
+            "按重复提醒规则继续",
+            "今天不再提醒",
+        ]
+
+        missed_action_to_index = {
+            "none": 0,
+            "snooze_5": 1,
+            "repeat": 2,
+            "skip_today": 3,
+        }
+
+        self.missed_reminder_action_combo = self.add_combo_row(
             container,
             title="错过提醒后的处理",
             description="如果提醒弹窗被关闭或没有响应，决定后续处理方式。",
-            items=["不处理", "5 分钟后再次提醒", "按重复提醒规则继续", "今天不再提醒"],
-            current_index=2,
+            items=missed_action_items,
+            current_index=missed_action_to_index.get(missed_action, 2),
         )
 
 
@@ -1658,6 +1677,7 @@ class SettingsDialog(QDialog):
             or self.reminder_popup_focus_switch is None
             or self.show_reminder_popup_switch is None
             or self.confirm_skip_today_switch is None
+            or self.missed_reminder_action_combo is None
             or self.default_snooze_combo is None
             or self.default_remind_time_combo is None
             or self.default_repeat_interval_combo is None
@@ -1668,6 +1688,20 @@ class SettingsDialog(QDialog):
             or self.quiet_hours_custom_end_combo is None
         ):
             return
+
+        missed_action_text = self.missed_reminder_action_combo.currentText()
+
+        missed_action_map = {
+            "不处理": "none",
+            "5 分钟后再次提醒": "snooze_5",
+            "按重复提醒规则继续": "repeat",
+            "今天不再提醒": "skip_today",
+        }
+
+        missed_reminder_action = missed_action_map.get(
+            missed_action_text,
+            "repeat"
+        )
 
         snooze_text = self.default_snooze_combo.currentText()
 
@@ -1721,6 +1755,7 @@ class SettingsDialog(QDialog):
             reminder_popup_auto_focus=self.reminder_popup_focus_switch.isChecked(),
             reminder_sound_enabled=reminder_sound_enabled,
             reminder_sound_file=selected_sound,
+            missed_reminder_action=missed_reminder_action,
 
             # 静默时段
             quiet_hours_enabled=self.quiet_hours_enabled_switch.isChecked(),

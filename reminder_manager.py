@@ -191,6 +191,60 @@ class ReminderManager:
             repeat_interval_minutes
         )
 
+    def handle_missed_reminder(
+        self,
+        task_id,
+        title,
+        remind_time,
+        repeat_interval_minutes=None
+    ):
+        """
+        处理提醒弹窗被关闭或没有明确操作后的行为。
+
+        支持配置：
+            none        不处理
+            snooze_5    5 分钟后再次提醒
+            repeat      按重复提醒规则继续
+            skip_today  今天不再提醒
+        """
+        reminder_config = self.get_reminder_config()
+
+        missed_action = str(
+            reminder_config.get("missed_reminder_action", "repeat")
+        )
+
+        if missed_action == "none":
+            if self.main_window is not None and hasattr(self.main_window, "tip_label"):
+                self.main_window.tip_label.setText(
+                    f"已关闭提醒，暂不继续处理：{title}"
+                )
+            return
+
+        if missed_action == "snooze_5":
+            snooze_until = datetime.now() + timedelta(minutes=5)
+
+            self.schedule_snooze(
+                task_id,
+                title,
+                remind_time,
+                snooze_until,
+                repeat_interval_minutes
+            )
+            return
+
+        if missed_action == "skip_today":
+            # 这里不再弹二次确认，因为用户已经在设置里选择了这种策略。
+            self.skip_task_today(task_id, title)
+            return
+
+        # 默认：按重复提醒规则继续
+        self.schedule_repeat_if_needed(
+            task_id,
+            title,
+            remind_time,
+            repeat_interval_minutes
+        )
+
     def start(self):
         """
         启动提醒检查定时器。
@@ -309,8 +363,15 @@ class ReminderManager:
 
         if action_result == ReminderDialog.RESULT_OPEN:
             self.main_window.show_main_window()
+            self.schedule_repeat_if_needed(
+                task_id,
+                title,
+                remind_time,
+                repeat_interval_minutes
+            )
+            return
 
-        self.schedule_repeat_if_needed(
+        self.handle_missed_reminder(
             task_id,
             title,
             remind_time,
