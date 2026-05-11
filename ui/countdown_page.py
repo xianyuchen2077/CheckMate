@@ -1,3 +1,4 @@
+import datetime
 from PySide6.QtCore import Qt, QTimer, QTime
 from PySide6.QtWidgets import (
     QFrame,
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import database
 
 class CountdownPage(QWidget):
     """
@@ -28,6 +30,9 @@ class CountdownPage(QWidget):
         self.total_seconds = 25 * 60
         self.remaining_seconds = self.total_seconds
         self.is_running = False
+
+        self.focus_started_at = None
+        self.focus_planned_seconds = self.total_seconds
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
@@ -432,6 +437,12 @@ class CountdownPage(QWidget):
         if self.remaining_seconds <= 0:
             self.remaining_seconds = self.total_seconds
 
+        # 从完整时长开始时，记录一次新的专注开始时间。
+        # 暂停后继续不重置 started_at。
+        if self.focus_started_at is None or self.remaining_seconds == self.total_seconds:
+            self.focus_started_at = datetime.datetime.now()
+            self.focus_planned_seconds = self.total_seconds
+
         self.is_running = True
         self.timer.start(1000)
         self.update_button_state()
@@ -451,6 +462,8 @@ class CountdownPage(QWidget):
         self.is_running = False
         self.timer.stop()
         self.remaining_seconds = self.total_seconds
+        self.focus_started_at = None
+        self.focus_planned_seconds = self.total_seconds
         self.update_time_label()
         self.update_button_state()
 
@@ -468,6 +481,111 @@ class CountdownPage(QWidget):
         if self.remaining_seconds <= 0:
             self.finish_countdown()
 
+    def get_main_window(self):
+        """
+        获取主窗口引用。
+
+        CountdownPage 是 MainWindow 的子控件，
+        当前 MainWindow 在创建时传入了 self 作为 parent。
+        """
+        parent = self.parent()
+
+        if parent is not None:
+            return parent
+
+        return None
+
+    def format_duration_text(self, seconds):
+        """
+        将秒数格式化成适合展示的中文时长。
+        """
+        seconds = int(seconds)
+
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        rest_seconds = seconds % 60
+
+        parts = []
+
+        if hours > 0:
+            parts.append(f"{hours} 小时")
+
+        if minutes > 0:
+            parts.append(f"{minutes} 分钟")
+
+        if rest_seconds > 0 or not parts:
+            parts.append(f"{rest_seconds} 秒")
+
+        return "".join(parts)
+
+    def save_focus_session(self):
+        """
+        保存本次完成的专注记录。
+        """
+        ended_at = datetime.datetime.now()
+
+        if self.focus_started_at is None:
+            self.focus_started_at = ended_at
+
+        actual_seconds = max(
+            1,
+            int((ended_at - self.focus_started_at).total_seconds())
+        )
+
+        # 倒计时正常结束时，实际专注时长按计划时长记录更符合用户预期。
+        # 如果后续要记录暂停时间，可以再细化。
+        actual_seconds = max(actual_seconds, int(self.focus_planned_seconds))
+
+        database.add_focus_session(
+            title="专注倒计时",
+            planned_seconds=self.focus_planned_seconds,
+            actual_seconds=actual_seconds,
+            started_at=self.focus_started_at,
+            ended_at=ended_at,
+            completed=True
+        )
+
+    def notify_focus_finished(self):
+        """
+        倒计时结束后通知用户，并联动主窗口和宠物。
+        """
+        main_window = self.get_main_window()
+
+        duration_text = self.format_duration_text(self.focus_planned_seconds)
+
+        if main_window is not None and hasattr(main_window, "tray_manager"):
+            tray_manager = getattr(main_window, "tray_manager", None)
+
+            if tray_manager is not None:
+                tray_manager.show_message(
+                    "CheckMate 专注完成",
+                    f"本次专注 {duration_text} 完成了，休息一下吧。",
+                    5000,
+                    icon_type="success"
+                )
+
+        tip_label = getattr(main_window, "tip_label", None)
+
+        if tip_label is not None:
+            try:
+                stats = database.get_today_focus_stats()
+                total_focus_text = self.format_duration_text(stats["total_seconds"])
+
+                tip_label.setText(
+                    f"专注完成：本次 {duration_text}。"
+                    f"今日已专注 {stats['count']} 次，共 {total_focus_text}。"
+                )
+            except Exception:
+                tip_label.setText(
+                    f"专注完成：本次 {duration_text}。"
+                )
+
+        if main_window is not None and hasattr(main_window, "pet_window"):
+            pet_window = getattr(main_window, "pet_window", None)
+
+            if pet_window is not None:
+                pet_window.set_done()
+
     def finish_countdown(self):
         """
         倒计时结束。
@@ -477,6 +595,16 @@ class CountdownPage(QWidget):
         self.remaining_seconds = 0
         self.update_time_label()
         self.update_button_state()
+
+        try:
+            self.save_focus_session()
+        except Exception as error:
+            print(f"保存专注记录失败：{error}")
+
+        self.notify_focus_finished()
+
+        self.focus_started_at = None
+        self.focus_planned_seconds = self.total_seconds
 
         QMessageBox.information(
             self,

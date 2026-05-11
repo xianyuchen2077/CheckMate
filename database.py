@@ -157,6 +157,20 @@ def init_db():
         0
     ))
 
+    # 专注记录表：保存倒计时完成记录
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS focus_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            planned_seconds INTEGER NOT NULL,
+            actual_seconds INTEGER NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT NOT NULL,
+            completed INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -1035,3 +1049,116 @@ def refresh_tasks_for_today():
         "unfinished_task_rolled": unfinished_task_rolled_count,
         "total_changed": changed_count,
     }
+
+def add_focus_session(
+    title,
+    planned_seconds,
+    actual_seconds,
+    started_at,
+    ended_at,
+    completed=True
+):
+    """
+    新增一条专注记录。
+
+    参数：
+        title: 专注标题，第一版可为空
+        planned_seconds: 计划专注秒数
+        actual_seconds: 实际专注秒数
+        started_at: 开始时间，datetime 或字符串
+        ended_at: 结束时间，datetime 或字符串
+        completed: 是否正常完成
+    """
+    if isinstance(started_at, datetime):
+        started_at = started_at.strftime("%Y-%m-%d %H:%M:%S")
+
+    if isinstance(ended_at, datetime):
+        ended_at = ended_at.strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO focus_sessions (
+            title,
+            planned_seconds,
+            actual_seconds,
+            started_at,
+            ended_at,
+            completed
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        title,
+        int(planned_seconds),
+        int(actual_seconds),
+        str(started_at),
+        str(ended_at),
+        1 if completed else 0,
+    ))
+
+    conn.commit()
+    conn.close()
+
+    refresh_integrity_after_db_change()
+
+
+def get_today_focus_stats():
+    """
+    获取今日专注统计。
+
+    返回：
+        {
+            "count": 今日完成专注次数,
+            "total_seconds": 今日完成专注总秒数
+        }
+    """
+    today = get_today_string()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT
+            COUNT(*) AS count,
+            COALESCE(SUM(actual_seconds), 0) AS total_seconds
+        FROM focus_sessions
+        WHERE completed = 1
+          AND substr(ended_at, 1, 10) = ?
+    """, (today,))
+
+    row = cursor.fetchone()
+    conn.close()
+
+    return {
+        "count": row["count"],
+        "total_seconds": row["total_seconds"],
+    }
+
+
+def get_recent_focus_sessions(limit=20):
+    """
+    获取最近专注记录。
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT
+            id,
+            title,
+            planned_seconds,
+            actual_seconds,
+            started_at,
+            ended_at,
+            completed,
+            created_at
+        FROM focus_sessions
+        ORDER BY ended_at DESC
+        LIMIT ?
+    """, (int(limit),))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return rows
