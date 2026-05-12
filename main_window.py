@@ -759,9 +759,14 @@ class MainWindow(QMainWindow):
         repeat_interval_minutes = task["repeat_interval_minutes"]
         next_remind_time = self.get_runtime_next_remind_time_text(task_id)
         task_type = task["task_type"]
+        repeat_active_start = task["repeat_active_start"]
+        repeat_active_end = task["repeat_active_end"]
 
         if repeat_interval_minutes:
             repeat_text = self.format_repeat_interval(repeat_interval_minutes)
+
+            if repeat_active_start and repeat_active_end:
+                repeat_text = f"{repeat_text}，激活时段 {repeat_active_start}-{repeat_active_end}"
         else:
             repeat_text = "不重复"
 
@@ -837,18 +842,28 @@ class MainWindow(QMainWindow):
         )
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            title, remind_time, description, repeat_interval_minutes, task_type = dialog.get_data()
+            (
+                title,
+                remind_time,
+                description,
+                repeat_interval_minutes,
+                task_type,
+                repeat_active_start,
+                repeat_active_end
+            ) = dialog.get_data()
 
             if not title:
                 QMessageBox.information(self, "提示", "任务名称不能为空。")
                 return
 
             database.add_task(
-                title,
-                remind_time,
-                description,
-                repeat_interval_minutes,
-                task_type
+                title=title,
+                remind_time=remind_time,
+                description=description,
+                repeat_interval_minutes=repeat_interval_minutes,
+                task_type=task_type,
+                repeat_active_start=repeat_active_start,
+                repeat_active_end=repeat_active_end
             )
 
             if remind_time:
@@ -884,12 +899,22 @@ class MainWindow(QMainWindow):
             repeat_interval_minutes=task["repeat_interval_minutes"],
             task_type=task["task_type"],
             default_remind_time=default_remind_time,
+            repeat_active_start=task["repeat_active_start"],
+            repeat_active_end=task["repeat_active_end"],
         )
 
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
-        title, remind_time, description, repeat_interval_minutes, task_type = dialog.get_data()
+        (
+            title,
+            remind_time,
+            description,
+            repeat_interval_minutes,
+            task_type,
+            repeat_active_start,
+            repeat_active_end
+        ) = dialog.get_data()
 
         if not title:
             QMessageBox.information(self, "提示", "任务名称不能为空。")
@@ -903,7 +928,9 @@ class MainWindow(QMainWindow):
             remind_time=remind_time,
             description=description,
             repeat_interval_minutes=repeat_interval_minutes,
-            task_type=task_type
+            task_type=task_type,
+            repeat_active_start=repeat_active_start,
+            repeat_active_end=repeat_active_end
         )
 
         # 编辑后，同步提醒管理器
@@ -917,7 +944,9 @@ class MainWindow(QMainWindow):
                     task_id,
                     title,
                     remind_time,
-                    repeat_interval_minutes
+                    repeat_interval_minutes,
+                    repeat_active_start,
+                    repeat_active_end
                 )
 
         if remind_time:
@@ -1017,6 +1046,8 @@ class MainWindow(QMainWindow):
         title = task["title"]
         remind_time = task["remind_time"]
         repeat_interval_minutes = task["repeat_interval_minutes"]
+        repeat_active_start = task["repeat_active_start"]
+        repeat_active_end = task["repeat_active_end"]
 
         # 重复任务：今天至少完成过一次，就要写入 checkins。
         # INSERT OR IGNORE 会保证同一天不会重复插入多条记录。
@@ -1054,7 +1085,9 @@ class MainWindow(QMainWindow):
                 task_id,
                 title,
                 remind_time,
-                repeat_interval_minutes
+                repeat_interval_minutes,
+                repeat_active_start,
+                repeat_active_end
             )
 
         self.load_tasks()
@@ -1160,15 +1193,10 @@ class MainWindow(QMainWindow):
         title,
         remind_time,
         repeat_interval_minutes,
+        repeat_active_start=None,
+        repeat_active_end=None,
         is_edit=False
     ):
-        """
-        添加 / 编辑任务保存后，处理提醒管理器同步。
-
-        重点：
-            如果任务被设置为重复提醒，不应该只等每天 remind_time 那一分钟。
-            编辑后应该主动安排下一轮重复提醒。
-        """
         if not remind_time:
             return
 
@@ -1184,7 +1212,9 @@ class MainWindow(QMainWindow):
             task_id,
             title,
             remind_time,
-            repeat_interval_minutes
+            repeat_interval_minutes,
+            repeat_active_start,
+            repeat_active_end
         )
 
     def update_stats(self):
@@ -1248,12 +1278,16 @@ class MainWindow(QMainWindow):
 
         return "⬜"
 
-
     def format_repeat_interval(self, repeat_interval_minutes):
         """
         把重复提醒间隔格式化成显示文字。
         """
         if repeat_interval_minutes is None:
+            return ""
+
+        try:
+            repeat_interval_minutes = int(repeat_interval_minutes)
+        except (TypeError, ValueError):
             return ""
 
         if repeat_interval_minutes < 60:

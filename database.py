@@ -98,11 +98,23 @@ def init_db():
             ADD COLUMN task_date TEXT
         """)
 
+    cursor.execute("""
+        UPDATE tasks
+        SET task_date = substr(created_at, 1, 10)
+        WHERE task_date IS NULL
+        OR task_date = ''
+    """)
+
+    if "repeat_active_start" not in columns:
         cursor.execute("""
-            UPDATE tasks
-            SET task_date = substr(created_at, 1, 10)
-            WHERE task_date IS NULL
-            OR task_date = ''
+            ALTER TABLE tasks
+            ADD COLUMN repeat_active_start TEXT
+        """)
+
+    if "repeat_active_end" not in columns:
+        cursor.execute("""
+            ALTER TABLE tasks
+            ADD COLUMN repeat_active_end TEXT
         """)
 
     # 打卡记录表：保存每天的完成记录
@@ -210,6 +222,8 @@ def get_all_tasks_with_today_status():
             tasks.title,
             tasks.remind_time,
             tasks.repeat_interval_minutes,
+            tasks.repeat_active_start,
+            tasks.repeat_active_end,
             tasks.task_type,
             tasks.is_archived,
             tasks.is_active,
@@ -244,7 +258,9 @@ def add_task(
     remind_time=None,
     description=None,
     repeat_interval_minutes=None,
-    task_type="habit"
+    task_type="habit",
+    repeat_active_start=None,
+    repeat_active_end=None
 ):
     today = get_today_string()
 
@@ -258,16 +274,20 @@ def add_task(
             description,
             repeat_interval_minutes,
             task_type,
+            repeat_active_start,
+            repeat_active_end,
             is_archived,
             task_date
         )
-        VALUES (?, ?, ?, ?, ?, 0, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
     """, (
         title,
         remind_time,
         description,
         repeat_interval_minutes,
         task_type,
+        repeat_active_start,
+        repeat_active_end,
         today
     ))
 
@@ -287,6 +307,8 @@ def get_task_by_id(task_id):
             remind_time,
             description,
             repeat_interval_minutes,
+            repeat_active_start,
+            repeat_active_end,
             task_type,
             is_archived,
             task_date,
@@ -307,7 +329,9 @@ def update_task(
     remind_time,
     description=None,
     repeat_interval_minutes=None,
-    task_type="habit"
+    task_type="habit",
+    repeat_active_start=None,
+    repeat_active_end=None
 ):
     today = get_today_string()
 
@@ -334,6 +358,8 @@ def update_task(
                 description = ?,
                 repeat_interval_minutes = ?,
                 task_type = ?,
+                repeat_active_start = ?,
+                repeat_active_end = ?,
                 task_date = ?,
                 is_archived = 0
             WHERE id = ?
@@ -343,6 +369,8 @@ def update_task(
             description,
             repeat_interval_minutes,
             task_type,
+            repeat_active_start,
+            repeat_active_end,
             today,
             task_id
         ))
@@ -354,6 +382,8 @@ def update_task(
                 description = ?,
                 repeat_interval_minutes = ?,
                 task_type = ?,
+                repeat_active_start = ?,
+                repeat_active_end = ?,
                 is_archived = 0
             WHERE id = ?
         """, (
@@ -362,6 +392,8 @@ def update_task(
             description,
             repeat_interval_minutes,
             task_type,
+            repeat_active_start,
+            repeat_active_end,
             task_id
         ))
 
@@ -585,6 +617,8 @@ def get_due_tasks_now():
             tasks.title,
             tasks.remind_time,
             tasks.repeat_interval_minutes,
+            tasks.repeat_active_start,
+            tasks.repeat_active_end,
             tasks.task_type,
             tasks.task_date
         FROM tasks

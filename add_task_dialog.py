@@ -133,12 +133,20 @@ class AddTaskDialog(QDialog):
         description="",
         repeat_interval_minutes=None,
         task_type="habit",
-        default_remind_time=None
+        default_remind_time=None,
+        repeat_active_start=None,
+        repeat_active_end=None
     ):
         super().__init__(parent)
 
         self.task_type = task_type or "habit"
         self.default_remind_time = default_remind_time or "10:00"
+        self.repeat_active_start = repeat_active_start or "08:00"
+        self.repeat_active_end = repeat_active_end or "22:00"
+
+        self.repeat_active_widget = None
+        self.repeat_active_start_combo = None
+        self.repeat_active_end_combo = None
 
         self.setWindowTitle("添加任务" if not title else "编辑任务")
         # 固定尺寸，避免拖动或重绘时布局变形
@@ -239,6 +247,50 @@ class AddTaskDialog(QDialog):
 
         self.enable_time_checkbox.stateChanged.connect(self.on_time_checkbox_changed)
 
+        self.repeat_active_widget = QWidget()
+        repeat_active_layout = QHBoxLayout()
+        repeat_active_layout.setContentsMargins(0, 0, 0, 0)
+        repeat_active_layout.setSpacing(8)
+        self.repeat_active_widget.setLayout(repeat_active_layout)
+
+        self.repeat_active_start_combo = QComboBox()
+        self.repeat_active_end_combo = QComboBox()
+
+        time_items = [
+            "00:00", "01:00", "02:00", "03:00",
+            "04:00", "05:00", "06:00", "07:00",
+            "08:00", "09:00", "10:00", "11:00",
+            "12:00", "13:00", "14:00", "15:00",
+            "16:00", "17:00", "18:00", "19:00",
+            "20:00", "21:00", "22:00", "23:00",
+        ]
+
+        self.repeat_active_start_combo.addItems(time_items)
+        self.repeat_active_end_combo.addItems(time_items)
+
+        if self.repeat_active_start in time_items:
+            self.repeat_active_start_combo.setCurrentText(self.repeat_active_start)
+        else:
+            self.repeat_active_start_combo.setCurrentText("08:00")
+
+        if self.repeat_active_end in time_items:
+            self.repeat_active_end_combo.setCurrentText(self.repeat_active_end)
+        else:
+            self.repeat_active_end_combo.setCurrentText("22:00")
+
+        repeat_active_layout.addWidget(QLabel("从"))
+        repeat_active_layout.addWidget(self.repeat_active_start_combo)
+        repeat_active_layout.addWidget(QLabel("到"))
+        repeat_active_layout.addWidget(self.repeat_active_end_combo)
+        repeat_active_layout.addWidget(QLabel("期间重复提醒"))
+        repeat_active_layout.addStretch()
+
+        # 尝试监听 RepeatReminderWidget 内部的下拉框变化
+        for combo in self.repeat_widget.findChildren(QComboBox):
+            combo.currentIndexChanged.connect(self.update_repeat_active_visibility)
+
+        self.enable_time_checkbox.stateChanged.connect(self.update_repeat_active_visibility)
+
         form_layout = QFormLayout()
 
         # 左侧文字放在对应输入框的正左边，并垂直居中
@@ -260,12 +312,14 @@ class AddTaskDialog(QDialog):
         description_label = self.create_form_label("备注说明：", offset_y=12)
         time_label = self.create_form_label("提醒时间：", offset_y=4)
         repeat_label = self.create_form_label("重复提醒：", offset_y=80)
+        repeat_active_label = self.create_form_label("激活时段：", offset_y=4)
 
         form_layout.addRow(name_label, self.title_edit)
         form_layout.addRow(description_label, self.description_edit)
         form_layout.addRow("", self.enable_time_checkbox)
         form_layout.addRow(time_label, time_control_layout)
         form_layout.addRow(repeat_label, self.repeat_widget)
+        form_layout.addRow(repeat_active_label, self.repeat_active_widget)
 
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
@@ -298,6 +352,8 @@ class AddTaskDialog(QDialog):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.addWidget(background_widget)
 
+        self.update_repeat_active_visibility()
+
         self.setLayout(outer_layout)
         self.setStyleSheet(get_add_task_dialog_style(get_add_task_background_path()))
 
@@ -324,6 +380,37 @@ class AddTaskDialog(QDialog):
         self.time_now_btn.setEnabled(enabled)
 
         self.repeat_widget.set_time_enabled(enabled)
+        self.update_repeat_active_visibility()
+
+    def is_repeat_enabled(self):
+        """
+        判断当前是否启用了重复提醒。
+        """
+        if not self.enable_time_checkbox.isChecked():
+            return False
+
+        repeat_interval_minutes = self.repeat_widget.get_repeat_interval_minutes()
+
+        try:
+            if repeat_interval_minutes is None:
+                return False
+
+            repeat_interval_minutes = int(repeat_interval_minutes)
+            return repeat_interval_minutes > 0
+
+        except (TypeError, ValueError):
+            return False
+
+
+    def update_repeat_active_visibility(self):
+        """
+        只有启用提醒时间，并且选择了重复提醒时，
+        才显示“重复提醒激活时段”。
+        """
+        if self.repeat_active_widget is None:
+            return
+
+        self.repeat_active_widget.setVisible(self.is_repeat_enabled())
 
     def adjust_time(self, minutes):
         """
@@ -351,7 +438,42 @@ class AddTaskDialog(QDialog):
 
         task_type = "habit" if self.task_type_switch.isChecked() else "task"
 
-        return title, remind_time, description, repeat_interval_minutes, task_type
+        repeat_active_start = None
+        repeat_active_end = None
+
+        if repeat_interval_minutes is not None:
+            try:
+                repeat_interval_value = int(repeat_interval_minutes)
+            except (TypeError, ValueError):
+                repeat_interval_value = 0
+
+            if repeat_interval_value > 0:
+                repeat_active_start = None
+                repeat_active_end = None
+
+                if repeat_interval_minutes is not None:
+                    try:
+                        repeat_interval_value = int(repeat_interval_minutes)
+                    except (TypeError, ValueError):
+                        repeat_interval_value = 0
+
+                    if (
+                        repeat_interval_value > 0
+                        and self.repeat_active_start_combo is not None
+                        and self.repeat_active_end_combo is not None
+                    ):
+                        repeat_active_start = self.repeat_active_start_combo.currentText()
+                        repeat_active_end = self.repeat_active_end_combo.currentText()
+
+        return (
+            title,
+            remind_time,
+            description,
+            repeat_interval_minutes,
+            task_type,
+            repeat_active_start,
+            repeat_active_end
+        )
 
     def on_task_type_changed(self, checked):
         """

@@ -2369,9 +2369,16 @@ class SettingsDialog(QDialog):
         关于软件 slogan 隐藏点击入口。
 
         规则：
-            5 秒内连续点击“今天也别悄悄变成咸鱼。”6 次，开启开发者模式。
+            8 秒内连续点击“今天也别悄悄变成咸鱼。”10 次，开启开发者模式。
         """
+        if self.developer_mode_enabled:
+            event.accept()
+            return
+
         now = QDateTime.currentDateTime()
+
+        required_clicks = 10
+        time_window_ms = 8 * 1000
 
         if self.developer_first_click_time is None:
             self.developer_first_click_time = now
@@ -2379,20 +2386,21 @@ class SettingsDialog(QDialog):
         else:
             elapsed_ms = self.developer_first_click_time.msecsTo(now)
 
-            if elapsed_ms > 5 * 1000:
+            if elapsed_ms > time_window_ms:
                 self.developer_first_click_time = now
                 self.developer_click_count = 1
             else:
                 self.developer_click_count += 1
 
-        remaining = 6 - self.developer_click_count
+        remaining = required_clicks - self.developer_click_count
 
-        # Debug 输出点击状态
-        # if remaining > 0:
-        #     print(f"开发者模式还需要点击 {remaining} 次")
-        #     return
+        if remaining > 0:
+            # print(f"开发者模式还需要点击 {remaining} 次")
+            event.accept()
+            return
 
         self.enable_developer_mode()
+        event.accept()
 
     def enable_developer_mode(self):
         """
