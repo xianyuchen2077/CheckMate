@@ -1,3 +1,26 @@
+# CheckMate
+
+> A small personal productivity application built through AI-assisted rapid prototyping.
+
+CheckMate is a Windows desktop application developed with **Python, PySide6, and SQLite**. It explores task and habit management, reminders, countdowns, system-tray execution, desktop-pet interaction, local persistence, and backup protection.
+
+## Project Positioning
+
+**AI-assisted rapid prototyping / personal side project**
+
+This is a personal side project rather than a formal research project. It was created through rapid, AI-assisted iteration to turn a product idea into a working desktop application.
+
+The project is useful for demonstrating:
+
+- product prototyping
+- desktop GUI integration
+- local database usage
+- scheduling and reminder logic
+- background execution
+- iterative debugging and refinement
+
+---
+
 # CheckMate / 不要成为咸鱼
 
 > 一个带桌面宠物、任务提醒、重复提醒、倒计时、宠物养成、设置中心和数据安全保护的本地打卡督促小程序。
